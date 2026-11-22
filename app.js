@@ -1,7 +1,7 @@
 "use strict";
 
 /* ============================================================
-   RISHI MUSIC — FULL ENGINE (merged + fixed)
+   RISHI MUSIC — FULL ENGINE (merged + fixed + AI Voice DJ + Live AI Lyrics)
    ============================================================ */
 
 /* 1. SERVICE WORKER */
@@ -742,8 +742,8 @@ initDB().then(async function () {
 });
 
 /* ============================================================
-   16. PRO FEATURES (lyrics, queue, playlists, folders, stats,
-       backup, effects, crossfade, themes, voice, mini player)
+   16. PRO FEATURES (lyrics, live AI lyrics, Alexa-like Voice DJ,
+       queue, playlists, folders, stats, backup, effects, crossfade)
    ============================================================ */
 (function RishiProFeatures() {
     const FEATURE_KEY = "rishi_music_features_v1";
@@ -753,12 +753,13 @@ initDB().then(async function () {
     const featureData = Object.assign({
         tracks: {}, queue: [], history: [], totalSeconds: 0,
         crossfade: false, effects: false, reverb: 0, width: 100,
-        bass: 0, mid: 0, treble: 0, frequency: 1000
+        bass: 0, mid: 0, treble: 0, frequency: 1000,
+        aiDjEnabled: true, liveAiLyrics: false
     }, safeParse(localStorage.getItem(FEATURE_KEY), {}));
     featureData.tracks = featureData.tracks || {};
     featureData.queue = featureData.queue || [];
     featureData.history = featureData.history || [];
-    if (!featureData.width) featureData.width = 100;   // FIX 1: old saves had 0 = mono
+    if (!featureData.width) featureData.width = 100;
 
     function saveFeatureData() {
         try { localStorage.setItem(FEATURE_KEY, JSON.stringify(featureData)); }
@@ -800,6 +801,12 @@ initDB().then(async function () {
         "#rmx-lyrics-line{text-align:center;min-height:32px;font-weight:700;margin:8px 0;color:var(--accent,#1d72fe)}" +
         "#rmx-lyrics-list{max-height:190px;overflow:auto;text-align:center;line-height:1.8}" +
         "#rmx-lyrics-list .active{color:var(--accent,#1d72fe);font-weight:800}" +
+        "#rmx-dock-lyric{margin:6px 0;padding:7px 12px;border-radius:11px;background:rgba(29,114,254,.14);border:1px solid rgba(29,114,254,.3);color:var(--accent,#1d72fe);font-size:13px;font-weight:750;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}" +
+        ".rmx-box{margin-top:14px;padding:12px;border-radius:14px;background:rgba(127,127,127,.08);border:1px solid var(--panel-border,#192033)}" +
+        ".rmx-dj-log{max-height:160px;overflow:auto;display:grid;gap:6px;margin:8px 0;padding:8px;border-radius:10px;background:var(--bg,#08090d);font-size:13px}" +
+        ".rmx-dj-msg{padding:7px 10px;border-radius:10px;max-width:86%}" +
+        ".rmx-dj-msg.bot{background:rgba(29,114,254,.18);color:var(--text,#fff);justify-self:start}" +
+        ".rmx-dj-msg.user{background:rgba(127,127,127,.18);color:var(--text,#fff);justify-self:end}" +
         ".rmx-list{display:grid;gap:8px}" +
         ".rmx-row{display:flex;align-items:center;gap:8px;padding:9px;border-radius:11px;background:rgba(127,127,127,.08)}" +
         ".rmx-row .grow{flex:1;min-width:0}.rmx-row small{display:block;color:var(--muted,#94a3b8)}" +
@@ -818,6 +825,7 @@ initDB().then(async function () {
         '<div class="rmx-stat"><span class="rmx-muted">Favourite songs</span><b id="rmx-favs">0</b></div></div>' +
         '<p class="rmx-muted" id="rmx-topline" style="margin-top:10px">Recently played and most played songs will appear here.</p></div>' +
         '<div id="rmx-tools">' +
+        '<button class="rmx-btn primary" data-open="voicedj">🎙️ AI Voice DJ</button>' +
         '<button class="rmx-btn primary" data-open="player">♫ Player & Lyrics</button>' +
         '<button class="rmx-btn" data-open="queue">Queue</button>' +
         '<button class="rmx-btn" data-open="playlists">Smart Playlists</button>' +
@@ -834,10 +842,56 @@ initDB().then(async function () {
     const anchor = tracksContainer.parentElement || document.body;
     anchor.insertBefore(host, tracksContainer);
 
+    /* Inject live lyric line inside bottom dock */
+    if (dockSubtitle && !$("rmx-dock-lyric")) {
+        const dockLyric = document.createElement("div");
+        dockLyric.id = "rmx-dock-lyric";
+        dockLyric.textContent = "♪ Synced lyrics ready";
+        dockSubtitle.insertAdjacentElement("afterend", dockLyric);
+    }
+
+    /* Inject AI Voice DJ & Live AI Lyrics inside #settingsModal */
+    if (settingsModal && !$("rmx-settings-ai-box")) {
+        const panel = settingsModal.querySelector(".modal-content, .settings-panel, .panel") || settingsModal.firstElementChild;
+        if (panel) {
+            const box = document.createElement("div");
+            box.id = "rmx-settings-ai-box";
+            box.className = "rmx-box";
+            box.innerHTML =
+                '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px">' +
+                '<strong>🎙️ AI Voice DJ (Alexa-Style)</strong>' +
+                '<input type="checkbox" id="rmx-set-dj-toggle" ' + (featureData.aiDjEnabled ? "checked" : "") + '>' +
+                '</div>' +
+                '<div class="rmx-muted" id="rmx-set-dj-status" style="margin-bottom:8px">Tap Start Voice Chat to ask for songs, moods, movies, or directors in Tamil &amp; English.</div>' +
+                '<div class="rmx-actions" style="margin:0 0 12px">' +
+                '<button type="button" class="rmx-btn primary" id="rmx-set-start-dj">🎙️ Start Voice Chat</button>' +
+                '<button type="button" class="rmx-btn" id="rmx-set-stop-dj">Stop</button>' +
+                '</div>' +
+                '<div style="border-top:1px solid var(--panel-border,#192033);padding-top:10px;display:flex;align-items:center;justify-content:space-between;gap:8px">' +
+                '<strong>🎤 Live AI Lyrics (Auto-Transcribe)</strong>' +
+                '<input type="checkbox" id="rmx-set-live-lyrics" ' + (featureData.liveAiLyrics ? "checked" : "") + '>' +
+                '</div>' +
+                '<div class="rmx-muted" id="rmx-set-live-status" style="margin-top:4px">' +
+                (featureData.liveAiLyrics ? "Ready — Play a song to auto-transcribe Tamil &amp; English lyrics" : "Off") +
+                '</div>';
+            const footer = panel.querySelector(".modal-actions, .settings-actions");
+            if (footer) panel.insertBefore(box, footer);
+            else panel.appendChild(box);
+        }
+    }
+
     const modal = $("rmx-modal"), modalTitle = $("rmx-modal-title"), modalContent = $("rmx-modal-content");
     function openModal(title, html) { modalTitle.textContent = title; modalContent.innerHTML = html; modal.classList.add("open"); }
-    $("rmx-close").addEventListener("click", function () { modal.classList.remove("open"); });
-    modal.addEventListener("click", function (e) { if (e.target === modal) modal.classList.remove("open"); });
+    $("rmx-close").addEventListener("click", function () {
+        stopVoiceDj();
+        modal.classList.remove("open");
+    });
+    modal.addEventListener("click", function (e) {
+        if (e.target === modal) {
+            stopVoiceDj();
+            modal.classList.remove("open");
+        }
+    });
 
     function coverMarkup(track, extra) {
         const m = track ? metaFor(track.id) : null;
@@ -860,17 +914,343 @@ initDB().then(async function () {
             (top && metaFor(top.id).plays ? "  •  Most played: " + top.title : "");
     }
 
-    /* Lyrics */
-    function renderLyrics(track) {
-        if (!track || !$("rmx-lyrics-line")) return;
-        const lines = (metaFor(track.id).lyrics || "").split(/\r?\n/).map(function (line) {
+    /* ============================================================
+       A. ALEXA-LIKE AI VOICE DJ (TAMIL & ENGLISH + FUZZY MATCH)
+       ============================================================ */
+    let djRec = null;
+    let djConversationActive = false;
+
+    function normalizeKey(s) {
+        return String(s || "")
+            .toLowerCase()
+            .replace(/[\s\-_]+/g, "")
+            .replace(/[^\p{L}\p{N}]/gu, "");
+    }
+
+    const MOOD_KEYWORDS = {
+        love: ["love", "romantic", "kadhal", "காதல்", "melody", "மெலடி", "heart"],
+        mass: ["mass", "kuthu", "dance", "beat", "fast", "குத்து", "ஆட்டம்", "vijay", "youth"],
+        sad: ["sad", "soup", "breakup", "pain", "sogam", "சோகம்", "வலி", "alone"],
+        chill: ["chill", "relax", "sleep", "night", "calm", "இரவு", "அமைதி"]
+    };
+
+    function appendDjChat(role, text) {
+        const log = $("rmx-dj-log");
+        if (!log) return;
+        const div = document.createElement("div");
+        div.className = "rmx-dj-msg " + role;
+        div.textContent = text;
+        log.appendChild(div);
+        log.scrollTop = log.scrollHeight;
+    }
+
+    function setDjStatus(text) {
+        if ($("rmx-set-dj-status")) $("rmx-set-dj-status").textContent = text;
+        if ($("rmx-modal-dj-status")) $("rmx-modal-dj-status").textContent = text;
+    }
+
+    function speakDj(text, onDone) {
+        appendDjChat("bot", "🤖 " + text);
+        setDjStatus(text);
+        if (!("speechSynthesis" in window)) {
+            if (onDone) onDone();
+            return;
+        }
+        window.speechSynthesis.cancel();
+        const u = new SpeechSynthesisUtterance(text);
+        u.lang = /[\u0B80-\u0BFF]/.test(text) ? "ta-IN" : "en-US";
+        u.rate = 1.02;
+        u.onend = function () { if (onDone) onDone(); };
+        u.onerror = function () { if (onDone) onDone(); };
+        window.speechSynthesis.speak(u);
+    }
+
+    function matchTracksByVoice(spoken) {
+        const cleanSpoken = normalizeKey(spoken);
+        const words = spoken.toLowerCase().split(/[\s\-_]+/).filter(function (w) { return w.length > 1; });
+
+        let matches = tracks.map(function (t, i) { return i; }).filter(function (i) {
+            const tTitle = normalizeKey(tracks[i].title);
+            const tDir = normalizeKey(tracks[i].director);
+            return (cleanSpoken && (tTitle.includes(cleanSpoken) || cleanSpoken.includes(tTitle) || tDir.includes(cleanSpoken))) ||
+                   words.some(function (w) {
+                       const nw = normalizeKey(w);
+                       return nw.length > 2 && (tTitle.includes(nw) || tDir.includes(nw));
+                   });
+        });
+
+        if (!matches.length) {
+            Object.values(MOOD_KEYWORDS).forEach(function (keys) {
+                if (!matches.length && keys.some(function (k) { return spoken.toLowerCase().includes(k); })) {
+                    matches = tracks.map(function (t, i) { return i; }).filter(function (i) {
+                        const combo = (tracks[i].title + " " + tracks[i].director).toLowerCase();
+                        return keys.some(function (k) { return combo.includes(k); });
+                    });
+                }
+            });
+        }
+        return matches;
+    }
+
+    function stopVoiceDj() {
+        djConversationActive = false;
+        if ("speechSynthesis" in window) window.speechSynthesis.cancel();
+        if (djRec) {
+            try { djRec.stop(); } catch (_) {}
+            djRec = null;
+        }
+        setDjStatus("Voice DJ stopped.");
+    }
+
+    function startVoiceDjSession() {
+        featureData.aiDjEnabled = true;
+        saveFeatureData();
+        if ($("rmx-set-dj-toggle")) $("rmx-set-dj-toggle").checked = true;
+
+        const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!SR) {
+            alert("Voice DJ is not supported in this browser. Please use Google Chrome.");
+            return;
+        }
+        if (!tracks.length) {
+            speakDj("Your library is empty. Please import some songs first.");
+            return;
+        }
+
+        djConversationActive = true;
+        if (!audio.paused) pauseCurrentTrack();
+
+        function listenTurn() {
+            if (!djConversationActive) return;
+            if (djRec) { try { djRec.stop(); } catch (_) {} }
+
+            djRec = new SR();
+            djRec.lang = "ta-IN"; // Understands both Tamil & English
+            djRec.interimResults = false;
+            djRec.maxAlternatives = 3;
+
+            djRec.onstart = function () {
+                setDjStatus("🎙️ Listening (say a song, movie, director, mood, or 'stop')...");
+            };
+
+            djRec.onresult = async function (e) {
+                let allAlts = "";
+                for (let i = 0; i < e.results[0].length; i++) {
+                    allAlts += " " + e.results[0][i].transcript;
+                }
+                const primary = e.results[0][0].transcript.trim();
+                appendDjChat("user", "🗣️ " + primary);
+
+                const cmd = primary.toLowerCase();
+                if (cmd === "stop" || cmd === "cancel" || cmd === "exit" || cmd === "நிறுத்து") {
+                    djConversationActive = false;
+                    speakDj("Okay, closing Voice DJ.");
+                    return;
+                }
+                if (cmd.includes("next") || cmd.includes("skip") || cmd.includes("அடுத்த")) {
+                    djConversationActive = false;
+                    speakDj("Playing next song.", function () { advanceToNextTrack(); });
+                    return;
+                }
+                if (cmd.includes("pause") || cmd.includes("stop music")) {
+                    djConversationActive = false;
+                    pauseCurrentTrack();
+                    speakDj("Music paused.");
+                    return;
+                }
+
+                const matches = matchTracksByVoice(allAlts);
+                if (matches.length) {
+                    const pick = matches[Math.floor(Math.random() * matches.length)];
+                    const song = tracks[pick];
+                    djConversationActive = false;
+                    speakDj("Playing " + song.title, async function () {
+                        if (await loadTrackSource(pick)) {
+                            await playCurrentTrack();
+                            if (settingsModal) settingsModal.classList.remove("open");
+                            modal.classList.remove("open");
+                        }
+                    });
+                } else {
+                    speakDj("I couldn't find " + primary + ". Try another song, director, or mood?", function () {
+                        listenTurn(); // Alexa-style follow-up listening turn
+                    });
+                }
+            };
+
+            djRec.onerror = function (err) {
+                if (err.error === "no-speech" && djConversationActive) {
+                    speakDj("I didn't hear anything. What would you like to listen to?", function () {
+                        listenTurn();
+                    });
+                } else {
+                    djConversationActive = false;
+                    setDjStatus("Voice DJ error: " + err.error);
+                }
+            };
+
+            djRec.onend = function () { djRec = null; };
+            try { djRec.start(); } catch (_) {}
+        }
+
+        speakDj("What would you like to listen to?", function () {
+            listenTurn();
+        });
+    }
+
+    function showVoiceDjModal() {
+        openModal("🎙️ AI Voice DJ",
+            '<p class="rmx-muted">Ask in <b>Tamil or English</b> for any song title, movie name, music director, or mood (love, mass, sad, chill).</p>' +
+            '<div id="rmx-modal-dj-status" style="font-weight:700;color:var(--accent,#1d72fe);margin:8px 0">Ready — Tap Start Voice Chat</div>' +
+            '<div class="rmx-dj-log" id="rmx-dj-log"></div>' +
+            '<div class="rmx-actions">' +
+            '<button class="rmx-btn primary" id="rmx-modal-start-dj">🎙️ Start Voice Chat</button>' +
+            '<button class="rmx-btn" id="rmx-modal-stop-dj">Stop</button></div>');
+        $("rmx-modal-start-dj").onclick = startVoiceDjSession;
+        $("rmx-modal-stop-dj").onclick = stopVoiceDj;
+        startVoiceDjSession();
+    }
+
+    if ($("rmx-set-dj-toggle")) {
+        $("rmx-set-dj-toggle").onchange = function (e) {
+            featureData.aiDjEnabled = e.target.checked;
+            saveFeatureData();
+            if (!featureData.aiDjEnabled) stopVoiceDj();
+        };
+    }
+    if ($("rmx-set-start-dj")) $("rmx-set-start-dj").onclick = startVoiceDjSession;
+    if ($("rmx-set-stop-dj")) $("rmx-set-stop-dj").onclick = stopVoiceDj;
+
+    /* ============================================================
+       B. AUTOMATIC LIVE AI LYRICS (CONTINUOUS REAL-TIME TRANSCRIBER)
+       ============================================================ */
+    let liveLyricRec = null;
+
+    function updateLiveLyricsStatus(msg) {
+        if ($("rmx-set-live-status")) $("rmx-set-live-status").textContent = msg;
+    }
+
+    function startLiveAiLyrics() {
+        if (!featureData.liveAiLyrics) return;
+        const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!SR) {
+            updateLiveLyricsStatus("Live AI Lyrics not supported in this browser.");
+            return;
+        }
+        if (liveLyricRec) return;
+
+        liveLyricRec = new SR();
+        liveLyricRec.lang = "ta-IN"; // Recognises Tamil & English singing
+        liveLyricRec.continuous = true;
+        liveLyricRec.interimResults = true;
+
+        liveLyricRec.onstart = function () {
+            updateLiveLyricsStatus("🎤 Listening to song & auto-saving lyrics...");
+        };
+
+        liveLyricRec.onresult = function (e) {
+            const t = currentTrack();
+            if (!t || audio.paused) return;
+
+            let interim = "";
+            for (let i = e.resultIndex; i < e.results.length; i++) {
+                const res = e.results[i];
+                const text = res[0].transcript.trim();
+                if (!text) continue;
+
+                if (res.isFinal) {
+                    const sec = audio.currentTime || 0;
+                    const m = String(Math.floor(sec / 60)).padStart(2, "0");
+                    const s = (sec % 60).toFixed(2).padStart(5, "0");
+                    const stampedLine = "[" + m + ":" + s + "]" + text;
+
+                    const mObj = metaFor(t.id);
+                    const existing = (mObj.lyrics || "").trim();
+                    mObj.lyrics = existing ? existing + "\n" + stampedLine : stampedLine;
+                    saveFeatureData();
+
+                    if ($("rmx-lyrics-input")) $("rmx-lyrics-input").value = mObj.lyrics;
+                    renderLyrics(t);
+                    syncDockLyric(t);
+                } else {
+                    interim = text;
+                }
+            }
+
+            if (interim) {
+                if ($("rmx-dock-lyric")) $("rmx-dock-lyric").textContent = "🎤 " + interim;
+                if ($("rmx-lyrics-line")) $("rmx-lyrics-line").textContent = interim;
+            }
+        };
+
+        liveLyricRec.onerror = function () {};
+
+        liveLyricRec.onend = function () {
+            liveLyricRec = null;
+            if (featureData.liveAiLyrics && !audio.paused) {
+                setTimeout(startLiveAiLyrics, 300);
+            } else {
+                updateLiveLyricsStatus(featureData.liveAiLyrics ? "Paused (waiting for playback)" : "Off");
+            }
+        };
+
+        try { liveLyricRec.start(); } catch (_) { liveLyricRec = null; }
+    }
+
+    function stopLiveAiLyrics() {
+        if (liveLyricRec) {
+            try { liveLyricRec.stop(); } catch (_) {}
+            liveLyricRec = null;
+        }
+        updateLiveLyricsStatus(featureData.liveAiLyrics ? "Paused (waiting for playback)" : "Off");
+    }
+
+    if ($("rmx-set-live-lyrics")) {
+        $("rmx-set-live-lyrics").onchange = function (e) {
+            featureData.liveAiLyrics = e.target.checked;
+            saveFeatureData();
+            if (featureData.liveAiLyrics) {
+                if (!audio.paused) startLiveAiLyrics();
+                else updateLiveLyricsStatus("Ready — Play a song to auto-transcribe Tamil & English lyrics");
+            } else {
+                stopLiveAiLyrics();
+            }
+        };
+    }
+
+    /* Lyrics Parser & Sync Renderer */
+    function parseLyricLines(raw) {
+        return (raw || "").split(/\r?\n/).map(function (line) {
             const m = line.match(/^\[(\d{1,2}):(\d{2})(?:\.(\d{1,3}))?\](.*)$/);
             return m ? { time: Number(m[1]) * 60 + Number(m[2]) + Number("0." + (m[3] || "0")), text: m[4] } : { time: null, text: line };
         }).filter(function (x) { return x.text.trim(); });
+    }
+
+    function syncDockLyric(track) {
+        const dockEl = $("rmx-dock-lyric");
+        if (!dockEl) return;
+        if (!track) {
+            dockEl.textContent = "♪ Synced lyrics ready";
+            return;
+        }
+        const lines = parseLyricLines(metaFor(track.id).lyrics);
+        if (!lines.length) {
+            dockEl.textContent = "♪ " + track.title + " — " + track.director;
+            return;
+        }
+        const timed = lines.filter(function (x) { return x.time !== null; });
+        const active = timed.filter(function (x) { return x.time <= (audio.currentTime || 0); }).pop();
+        const text = (active && active.text) || lines[0].text;
+        dockEl.textContent = "♪ " + text;
+    }
+
+    function renderLyrics(track) {
+        if (!track || !$("rmx-lyrics-line")) return;
+        const lines = parseLyricLines(metaFor(track.id).lyrics);
         const timed = lines.filter(function (x) { return x.time !== null; });
         const active = timed.filter(function (x) { return x.time <= (audio.currentTime || 0); }).pop();
         $("rmx-lyrics-line").textContent = (active && active.text) ||
-            (lines.length && !timed.length ? lines[0].text : "Add LRC lyrics to see synchronized lines");
+            (lines.length && !timed.length ? lines[0].text : "Add lyrics or enable Live AI Lyrics in Settings");
         $("rmx-lyrics-list").innerHTML = lines.map(function (x) {
             return '<div class="' + (x === active ? "active" : "") + '">' + esc(x.text) + "</div>";
         }).join("");
@@ -901,7 +1281,7 @@ initDB().then(async function () {
             '<div class="rmx-muted" style="text-align:center">' + esc(t ? t.director : "Choose a song from your library") + "</div>" +
             '<canvas id="rmx-visualizer"></canvas>' +
             '<div id="rmx-lyrics-line"></div><div id="rmx-lyrics-list"></div>' +
-            "<label>Lyrics (plain text or LRC timestamps like [00:12.50])</label>" +
+            "<label>Lyrics (Tamil &amp; English — plain text or LRC timestamps like [00:12.50])</label>" +
             '<textarea id="rmx-lyrics-input" placeholder="[00:05.00]First lyric line">' + esc(m ? m.lyrics : "") + "</textarea>" +
             '<label>Album cover for this song</label><input id="rmx-art-input" type="file" accept="image/*">' +
             '<div class="rmx-actions"><button class="rmx-btn primary" id="rmx-save-lyrics">Save lyrics</button>' +
@@ -911,7 +1291,7 @@ initDB().then(async function () {
         $("rmx-save-lyrics").onclick = function () {
             if (!t) return;
             metaFor(t.id).lyrics = $("rmx-lyrics-input").value;
-            saveFeatureData(); renderLyrics(t); alert("Lyrics saved for this song.");
+            saveFeatureData(); renderLyrics(t); syncDockLyric(t); alert("Lyrics saved for this song.");
         };
         $("rmx-favorite").onclick = function () {
             if (!t) return;
@@ -1226,7 +1606,7 @@ initDB().then(async function () {
             const main = card.querySelector(".track-main");
             if (main) {
                 const old = main.querySelector(".rmx-cover"); if (old) old.remove();
-                main.insertAdjacentHTML("afterbegin", coverMarkup(t));   // FIX 2: insert HTML, not a string node
+                main.insertAdjacentHTML("afterbegin", coverMarkup(t));
             }
             if (card.dataset.rmx) return;
             card.dataset.rmx = "1";
@@ -1239,9 +1619,9 @@ initDB().then(async function () {
         });
     }
     new MutationObserver(function () { enhanceTrackCards(); }).observe(tracksContainer, { childList: true });
-    window.rishiAfterInit = function () { enhanceTrackCards(); updateDashboard(); };
+    window.rishiAfterInit = function () { enhanceTrackCards(); updateDashboard(); syncDockLyric(currentTrack()); };
 
-    /* Play counts + listening time */
+    /* Play counts + listening time + Live AI Lyrics triggers */
     let countedTrackId = null, lastTick = 0, fadeInPending = false;
     audio.addEventListener("playing", function () {
         if (fadeInPending) {
@@ -1253,6 +1633,7 @@ initDB().then(async function () {
                 if (p >= 1) clearInterval(iv);
             }, 50);
         }
+        if (featureData.liveAiLyrics) startLiveAiLyrics();
         const t = currentTrack(); if (!t) return;
         if (countedTrackId !== t.id) {
             const m = metaFor(t.id); m.plays = (m.plays || 0) + 1; m.lastPlayed = Date.now();
@@ -1264,8 +1645,14 @@ initDB().then(async function () {
         lastTick = Date.now();
         if (audioCtx) audioCtx.resume().catch(function () {});
     });
-    audio.addEventListener("pause", function () { lastTick = 0; });
-    audio.addEventListener("ended", function () { countedTrackId = null; });
+    audio.addEventListener("pause", function () {
+        lastTick = 0;
+        stopLiveAiLyrics();
+    });
+    audio.addEventListener("ended", function () {
+        countedTrackId = null;
+        stopLiveAiLyrics();
+    });
 
     audio.addEventListener("timeupdate", function () {
         if (audio.paused) return;
@@ -1273,9 +1660,10 @@ initDB().then(async function () {
             featureData.totalSeconds += Math.round((Date.now() - lastTick) / 1000);
             lastTick = Date.now(); saveFeatureData(); updateDashboard();
         }
-        if (modal.classList.contains("open") && $("rmx-lyrics-line")) renderLyrics(currentTrack());
+        const t = currentTrack();
+        syncDockLyric(t);
+        if (modal.classList.contains("open") && $("rmx-lyrics-line")) renderLyrics(t);
 
-        /* FIX 4: safe crossfade — cancels on pause/seek, counts the song as played */
         if (featureData.crossfade && audio.duration && audio.duration - audio.currentTime <= 5 && !audio.__rmxFading) {
             audio.__rmxFading = true;
             userManuallyPaused = true;
@@ -1289,7 +1677,7 @@ initDB().then(async function () {
                 audio.volume = baseVol * (1 - p);
                 if (p >= 1) {
                     clearInterval(fade); audio.__rmxFading = false; audio.volume = baseVol;
-                    const t = currentTrack(); if (t) markSongAsPlayed(t.id);
+                    const curT = currentTrack(); if (curT) markSongAsPlayed(curT.id);
                     advanceToNextTrack();
                 }
             }, 100);
@@ -1331,7 +1719,7 @@ initDB().then(async function () {
         };
     }
 
-    /* Themes — FIX 3: saved through the normal settings, no forced "blue" on startup */
+    /* Themes */
     function showTheme() {
         const presets = { Blue: "#1d72fe", Purple: "#8b5cf6", Cyan: "#06b6d4", Green: "#16a34a", Pink: "#ec4899", Orange: "#f97316" };
         openModal("Accent Theme",
@@ -1351,26 +1739,37 @@ initDB().then(async function () {
     $("rmx-tools").addEventListener("click", function (e) {
         const key = e.target.closest("[data-open]");
         if (!key) return;
-        const map = { player: showPlayer, queue: showQueue, playlists: showPlaylists, folders: showFolders, audio: showAudioSettings, backup: showBackup, stats: showStats, theme: showTheme };
+        const map = {
+            voicedj: showVoiceDjModal,
+            player: showPlayer,
+            queue: showQueue,
+            playlists: showPlaylists,
+            folders: showFolders,
+            audio: showAudioSettings,
+            backup: showBackup,
+            stats: showStats,
+            theme: showTheme
+        };
         if (map[key.dataset.open]) map[key.dataset.open]();
     });
 
-    /* Fade-in on new track when crossfade is on, refresh player sheet */
+    /* Fade-in on new track when crossfade is on, refresh player sheet & lyrics */
     const oldLoad = loadTrackSource;
     loadTrackSource = async function (index) {
         const ok = await oldLoad(index);
         if (ok) {
             if (featureData.crossfade) { audio.volume = 0; fadeInPending = true; }
             updateDashboard();
+            syncDockLyric(currentTrack());
             if (modal.classList.contains("open") && modalTitle.textContent.indexOf("Player") === 0) showPlayer();
         }
         return ok;
     };
 
     if (featureData.effects) {
-        // Re-create the audio graph on the first tap after reload (browsers need a gesture to start audio).
         document.addEventListener("click", function once() { setupAudioGraph(); document.removeEventListener("click", once); }, { once: true });
     }
     updateDashboard();
+    syncDockLyric(currentTrack());
     setInterval(updateDashboard, 15000);
 })();
