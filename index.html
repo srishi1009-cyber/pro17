@@ -52,8 +52,8 @@ body {
 margin:0;
 background:var(--bg);
 color:var(--text);
-font:15px system-ui,sans-serif;
-padding:0 14px 180px;
+font:15px system-ui,-apple-system,"Noto Sans Tamil",sans-serif;
+padding:0 14px 190px;
 transition:background .25s,color .25s;
 }
 
@@ -107,7 +107,7 @@ text-shadow:0 0 15px rgba(var(--rgb),.5);
 
 /* BUTTONS */
 
-button,select,input {
+button,select,input,textarea {
 font:inherit;
 color:var(--text);
 }
@@ -379,6 +379,27 @@ color:var(--mut);
 font-size:12px;
 }
 
+/* LIVE SYNCED LYRIC BAR */
+#liveLyricBar {
+display:none;
+margin:6px 0 4px;
+padding:7px 12px;
+border-radius:12px;
+background:rgba(var(--rgb),.14);
+border:1px solid rgba(var(--rgb),.28);
+color:var(--accent);
+font-size:13px;
+font-weight:800;
+text-align:center;
+white-space:nowrap;
+overflow:hidden;
+text-overflow:ellipsis;
+}
+
+body.show-lyrics #liveLyricBar {
+display:block;
+}
+
 #prog {
 display:flex;
 align-items:center;
@@ -511,6 +532,67 @@ transition:.2s;
 
 .sw:checked::after {
 left:21px;
+}
+
+/* SETTINGS LYRICS BOX */
+.lyrics-settings-box {
+padding:12px;
+margin-top:8px;
+border-radius:16px;
+background:var(--card);
+border:1px solid var(--line);
+}
+
+.lyrics-live-preview {
+padding:10px 12px;
+border-radius:12px;
+background:rgba(var(--rgb),.14);
+border:1px solid rgba(var(--rgb),.28);
+color:var(--accent);
+font-weight:800;
+text-align:center;
+margin-bottom:10px;
+min-height:40px;
+display:flex;
+align-items:center;
+justify-content:center;
+}
+
+.lyrics-scroll-box {
+max-height:115px;
+overflow-y:auto;
+margin-bottom:10px;
+padding:8px;
+border-radius:10px;
+background:var(--bg);
+border:1px solid var(--line);
+text-align:center;
+font-size:13px;
+line-height:1.75;
+color:var(--mut);
+}
+
+.lyrics-scroll-box .active-line {
+color:var(--accent);
+font-weight:800;
+font-size:14px;
+}
+
+.lyrics-textarea {
+width:100%;
+min-height:110px;
+padding:11px;
+border-radius:12px;
+border:1px solid var(--line);
+background:var(--bg);
+outline:none;
+resize:vertical;
+font-size:13px;
+line-height:1.55;
+}
+
+.lyrics-textarea:focus {
+border-color:var(--accent);
 }
 
 .prev {
@@ -717,6 +799,8 @@ No track playing
 Select a song from your library
 </div>
 
+<div id="liveLyricBar">♪ Synced lyrics ready</div>
+
 <div id="prog">
 
 <span id="cur">0:00</span>
@@ -817,6 +901,24 @@ Apply colour
 Reset appearance
 </button>
 
+</div>
+
+<h3>Synced Lyrics (Tamil &amp; English)</h3>
+
+<div class="set">
+<label>Show live lyrics while playing</label>
+<input type="checkbox" class="sw" id="showLyrics">
+</div>
+
+<div class="lyrics-settings-box">
+<div class="sb" id="lyricsTrackName" style="margin-bottom:6px;font-weight:700">No track selected</div>
+<div class="lyrics-live-preview" id="settingsLiveLyric">Play a song to sync lyrics (தமிழ் / English)</div>
+<div class="lyrics-scroll-box" id="settingsLyricsList"></div>
+<textarea class="lyrics-textarea" id="settingsLyricsInput" placeholder="Paste Tamil or English LRC lyrics to sync line-by-line:&#10;[00:05.00]முதல் வரி / First line in English&#10;[00:10.50]இரண்டாவது வரி / Second line in English"></textarea>
+<div class="row" style="margin-top:8px">
+<button class="btn pri" id="saveLyricsBtn" style="padding:7px 14px;font-size:13px">Save Lyrics</button>
+<button class="btn" id="stampLyricBtn" style="padding:7px 14px;font-size:13px">+ Stamp Current Time</button>
+</div>
 </div>
 
 <h3>Playback</h3>
@@ -1127,6 +1229,7 @@ t.onerror=()=>rej(t.error);
 const DEF={
 theme:"system",
 accent:"#1d72fe",
+showLyrics:true,
 autoplay:true,
 gapless:false,
 crossfade:0,
@@ -1199,6 +1302,8 @@ document.body.classList.toggle("anim",st.anim);
 document.body.classList.toggle("compact",st.compact);
 
 document.body.classList.toggle("noart",!st.art);
+
+document.body.classList.toggle("show-lyrics",!!st.showLyrics);
 
 au.playbackRate=+st.speed;
 
@@ -1320,6 +1425,201 @@ let favs=jget("rishi_favs",[]);
 let plays=jget("rishi_plays",{});
 
 let recent=jget("rishi_recent",[]);
+
+let lyricsMap=jget("rishi_lyrics_v1",{});
+
+/* SYNCED LYRICS ENGINE (TAMIL & ENGLISH) */
+
+function parseLyrics(raw){
+
+if(!raw)return[];
+
+return String(raw).split(/\r?\n/).map(line=>{
+
+const m=line.match(/^\[(\d{1,2}):(\d{2})(?:\.(\d{1,3}))?\](.*)$/);
+
+if(m){
+
+const ms=m[3]?Number("0."+m[3]):0;
+
+return{
+time:Number(m[1])*60+Number(m[2])+ms,
+text:m[4].trim()
+};
+
+}
+
+return{time:null,text:line.trim()};
+
+}).filter(x=>x.text);
+
+}
+
+let lastActiveLyricIdx=-1;
+
+function loadLyricsEditor(){
+
+const t=tracks[cur];
+
+if(!t){
+
+$("lyricsTrackName").textContent="No track selected";
+
+$("settingsLyricsInput").value="";
+
+$("settingsLiveLyric").textContent="Play a song to sync lyrics (தமிழ் / English)";
+
+$("settingsLyricsList").innerHTML="";
+
+return;
+
+}
+
+$("lyricsTrackName").textContent=`Lyrics for: ${t.title}`;
+
+$("settingsLyricsInput").value=lyricsMap[t.id]||"";
+
+lastActiveLyricIdx=-1;
+
+updateSyncedLyrics(true);
+
+}
+
+function updateSyncedLyrics(forceScroll=false){
+
+const t=tracks[cur];
+
+const bar=$("liveLyricBar");
+
+const prev=$("settingsLiveLyric");
+
+const list=$("settingsLyricsList");
+
+if(!t){
+
+if(bar)bar.textContent="♪ No song playing";
+
+if(prev)prev.textContent="Play a song to sync lyrics (தமிழ் / English)";
+
+if(list)list.innerHTML="";
+
+return;
+
+}
+
+const lines=parseLyrics(lyricsMap[t.id]);
+
+if(!lines.length){
+
+if(bar)bar.textContent=`♪ ${t.title} — ${t.director}`;
+
+if(prev)prev.textContent="No lyrics saved for this song yet";
+
+if(list)list.innerHTML="";
+
+return;
+
+}
+
+const now=au.currentTime||0;
+
+const timed=lines.filter(x=>x.time!==null);
+
+let activeIdx=-1;
+
+if(timed.length){
+
+for(let i=0;i<lines.length;i++){
+
+if(lines[i].time!==null&&lines[i].time<=now)activeIdx=i;
+
+}
+
+} else {
+
+activeIdx=0;
+
+}
+
+const activeText=activeIdx>=0?lines[activeIdx].text:lines[0].text;
+
+if(bar)bar.textContent=`♪ ${activeText}`;
+
+if(prev)prev.textContent=activeText;
+
+if(list&&(forceScroll||activeIdx!==lastActiveLyricIdx)){
+
+lastActiveLyricIdx=activeIdx;
+
+list.innerHTML=lines.map((x,idx)=>
+`<div class="${idx===activeIdx?"active-line":""}">${esc(x.text)}</div>`
+).join("");
+
+const el=list.querySelector(".active-line");
+
+if(el)el.scrollIntoView({block:"nearest",behavior:"smooth"});
+
+}
+
+}
+
+$("saveLyricsBtn").onclick=()=>{
+
+const t=tracks[cur];
+
+if(!t){
+
+alert("Play or select a song first to save its lyrics.");
+
+return;
+
+}
+
+lyricsMap[t.id]=$("settingsLyricsInput").value;
+
+jset("rishi_lyrics_v1",lyricsMap);
+
+lastActiveLyricIdx=-1;
+
+updateSyncedLyrics(true);
+
+alert(`Lyrics saved for "${t.title}".`);
+
+};
+
+$("stampLyricBtn").onclick=()=>{
+
+const t=tracks[cur];
+
+if(!t){
+
+alert("Play a song first to stamp timestamps.");
+
+return;
+
+}
+
+const sec=au.currentTime||0;
+
+const m=String(Math.floor(sec/60)).padStart(2,"0");
+
+const s=(sec%60).toFixed(2).padStart(5,"0");
+
+const tag=`[${m}:${s}]`;
+
+const ta=$("settingsLyricsInput");
+
+const pos=ta.selectionStart||0;
+
+const val=ta.value;
+
+const lineStart=val.lastIndexOf("\n",pos-1)+1;
+
+ta.value=val.slice(0,lineStart)+tag+val.slice(lineStart);
+
+ta.focus();
+
+};
 
 const added=t=>+(/^track_(\d+)_/.exec(t.id)||[0,0])[1];
 
@@ -1655,6 +1955,8 @@ pre=null;
 
 media(t);
 
+loadLyricsEditor();
+
 return true;
 
 }
@@ -1719,8 +2021,6 @@ recent=[id,...recent.filter(x=>x!==id)].slice(0,50);
 jset("rishi_plays",plays);
 
 jset("rishi_recent",recent);
-
-markPlayedToday(id);
 
 }
 
@@ -1820,6 +2120,8 @@ if(ended)return;
 
 ended=true;
 
+markPlayedToday(tracks[cur]?.id);
+
 if(st.autoplay) {
 go(1,true);
 } else {
@@ -1848,6 +2150,8 @@ $("cur").textContent=fmt(t);
 
 $("dur").textContent=fmt(d);
 
+updateSyncedLyrics();
+
 const cf=+st.crossfade;
 
 let v=st.volume/100;
@@ -1870,6 +2174,8 @@ if((cf>0||st.gapless)
 
 ended=true;
 
+markPlayedToday(tracks[cur]?.id);
+
 go(1,true);
 
 }
@@ -1891,6 +2197,7 @@ $("bar").oninput=()=>{
 
 if(au.duration) {
 au.currentTime=$("bar").value/100*au.duration;
+updateSyncedLyrics(true);
 }
 
 };
@@ -2039,6 +2346,8 @@ $("dT").textContent="No track playing";
 
 $("dS").textContent="Select a song from your library";
 
+loadLyricsEditor();
+
 }
 
 else if(i<cur)cur--;
@@ -2047,7 +2356,11 @@ tracks.splice(i,1);
 
 favs=favs.filter(x=>x!==id);
 
+delete lyricsMap[id];
+
 jset("rishi_favs",favs);
+
+jset("rishi_lyrics_v1",lyricsMap);
 
 dirs();
 
@@ -2108,6 +2421,8 @@ if(tracks[cur]?.id===editingId){
 $("dT").textContent=t.title;
 
 $("dS").textContent=t.director;
+
+loadLyricsEditor();
 
 }
 
@@ -2327,6 +2642,7 @@ function sync(){
 
 for(const[id,k]of[
 ["theme","theme"],
+["showLyrics","showLyrics"],
 ["autoplay","autoplay"],
 ["gapless","gapless"],
 ["cf","crossfade"],
@@ -2359,6 +2675,8 @@ $("vv").textContent=st.volume+"%";
 }
 
 bind("theme","theme");
+
+bind("showLyrics","showLyrics");
 
 bind("autoplay","autoplay");
 
@@ -2472,6 +2790,8 @@ sync();
 
 preview(st.accent);
 
+loadLyricsEditor();
+
 $("cnt").textContent=tracks.length;
 
 $("stor").textContent="Calculating...";
@@ -2534,6 +2854,8 @@ recent,
 
 playedToday:dailyData(),
 
+lyrics:lyricsMap,
+
 tracks
 
 };
@@ -2556,7 +2878,7 @@ a.click();
 setTimeout(()=>URL.revokeObjectURL(u),1000);
 
 alert(
-"Backup created.\n\nThis backup contains your song list, favourites, settings and play history. It does not contain the actual audio files."
+"Backup created.\n\nThis backup contains your song list, favourites, settings, lyrics and play history. It does not contain the actual audio files."
 );
 
 };
@@ -2567,9 +2889,23 @@ let dp=null;
 
 const installBtn=$("installBtn");
 
+const isInstalled=()=>
+matchMedia("(display-mode: standalone)").matches||
+matchMedia("(display-mode: minimal-ui)").matches||
+matchMedia("(display-mode: fullscreen)").matches||
+navigator.standalone===true||
+LS.getItem("rishi_pwa_installed")==="true";
+
+if(isInstalled())installBtn.style.display="none";
+
 addEventListener("beforeinstallprompt",e=>{
 
 e.preventDefault();
+
+if(isInstalled()){
+installBtn.style.display="none";
+return;
+}
 
 dp=e;
 
@@ -2583,7 +2919,12 @@ if(dp){
 
 dp.prompt();
 
-await dp.userChoice;
+const res=await dp.userChoice;
+
+if(res.outcome==="accepted"){
+LS.setItem("rishi_pwa_installed","true");
+installBtn.style.display="none";
+}
 
 dp=null;
 
@@ -2602,6 +2943,8 @@ alert(
 };
 
 addEventListener("appinstalled",()=>{
+
+LS.setItem("rishi_pwa_installed","true");
 
 installBtn.style.display="none";
 
@@ -2632,6 +2975,8 @@ if(i>=0&&await load(i)){
 au.addEventListener("loadedmetadata",()=>{
 
 au.currentTime=p.t||0;
+
+updateSyncedLyrics(true);
 
 },{once:true});
 
