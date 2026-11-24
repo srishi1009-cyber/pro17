@@ -11,10 +11,10 @@
 <meta name="apple-mobile-web-app-title" content="Rishi Music">
 
 <link rel="manifest" href="./manifest.json">
-<link rel="icon" href="./icon-192.png">
-<link rel="apple-touch-icon" href="./icon-192.png">
+<link rel="icon" type="image/png" sizes="192x192" href="./icon-192.png">
+<link rel="apple-touch-icon" href="./icon-512.png">
 
-<title>RISHI MUSIC — Original Audio &amp; Hybrid AI</title>
+<title>RISHI MUSIC</title>
 
 <style>
 :root {
@@ -49,6 +49,36 @@ body {
   font:15px system-ui,-apple-system,"Noto Sans Tamil",sans-serif;
   padding:0 14px 205px;
   transition:background .25s,color .25s;
+}
+
+/* INSTANT BRAND SPLASH OVERLAY */
+#app-splash {
+  position:fixed;
+  inset:0;
+  z-index:999;
+  background:#070b16;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  gap:14px;
+  transition:opacity .28s ease;
+}
+#app-splash.hide {
+  opacity:0;
+  pointer-events:none;
+}
+#app-splash img {
+  width:112px;
+  height:112px;
+  border-radius:26px;
+  box-shadow:0 12px 32px rgba(29,114,254,.4);
+}
+#app-splash span {
+  font-weight:900;
+  font-size:19px;
+  letter-spacing:1.2px;
+  color:#eef1f8;
 }
 
 header {
@@ -681,6 +711,12 @@ body.compact #rvdj-widget { bottom:calc(90px + env(safe-area-inset-bottom)); }
 
 <body>
 
+<!-- BRAND SPLASH SCREEN -->
+<div id="app-splash" aria-hidden="true">
+  <img src="./icon-512.png" alt="Rishi Music">
+  <span>RISHI MUSIC</span>
+</div>
+
 <header>
   <div class="row">
     <h1>
@@ -745,7 +781,7 @@ body.compact #rvdj-widget { bottom:calc(90px + env(safe-area-inset-bottom)); }
   </div>
 </div>
 
-<!-- FLOATING RISHI VOICE DJ (AIRPODS + OFFLINE NORMAL / ONLINE ADVANCED AI) -->
+<!-- FLOATING RISHI VOICE DJ -->
 <div id="rvdj-widget">
   <div id="rvdj-card">
     <div class="rvdj-head">
@@ -833,7 +869,7 @@ body.compact #rvdj-widget { bottom:calc(90px + env(safe-area-inset-bottom)); }
     </div>
     <div class="lyrics-settings-box">
       <div class="sb" id="offlineModelStatus" style="margin-bottom:8px;font-weight:700;line-height:1.5">
-        ✅ Original Hardware Audio Active (Zero Background Stutter) • Dual Voice DJ Ready
+        ✅ Original Studio Sound Active (No 8D / Zero Background Stutter)
       </div>
       <div class="row" style="flex-wrap:wrap">
         <button type="button" class="btn pri" id="testVoiceBtn" style="padding:8px 14px;font-size:13px">
@@ -1133,7 +1169,7 @@ const delRec = id => new Promise((res, rej) => {
   t.onerror = () => rej(t.error);
 });
 
-/* 5. SETTINGS (PURE ORIGINAL AUDIO — NO 8D OR AUDIO-CONTEXT RESAMPLING) */
+/* 5. SETTINGS (PURE ORIGINAL HARDWARE AUDIO) */
 const DEF = {
   theme: "system",
   accent: "#1d72fe",
@@ -1193,6 +1229,7 @@ function apply() {
   document.body.classList.toggle("compact", st.compact);
   document.body.classList.toggle("noart", !st.art);
   document.body.classList.toggle("hide-lyrics", !st.showLyrics);
+  au.preservesPitch = true;
   au.playbackRate = +st.speed || 1;
   baseVol();
   $("shufBtn").classList.toggle("on", st.shuffle);
@@ -1644,8 +1681,25 @@ $("q").oninput = render;
 $("dir").onchange = render;
 $("viewBtn").onclick = () => { set({ view: st.view === "grid" ? "list" : "grid" }); render(); };
 
-/* 9. PLAYBACK ENGINE (DIRECT HARDWARE AUDIO — ZERO STUTTER) */
+/* 9. PLAYBACK ENGINE (PURE HARDWARE AUDIO + BACKGROUND WAKE LOCK + MEDIASESSION ARTWORK) */
 let pre = null;
+let wakeLock = null;
+
+async function requestWakeLock() {
+  try {
+    if ("wakeLock" in navigator && !wakeLock) {
+      wakeLock = await navigator.wakeLock.request("screen");
+      wakeLock.addEventListener("release", () => { wakeLock = null; });
+    }
+  } catch (_) {}
+}
+
+function releaseWakeLock() {
+  if (wakeLock) {
+    try { wakeLock.release(); } catch (_) {}
+    wakeLock = null;
+  }
+}
 
 function pickNext(dir = 1) {
   if (dir === 1 && smartQueue.length) {
@@ -1681,6 +1735,7 @@ async function load(i, preUrl) {
   url = u;
   cur = i;
   au.src = u;
+  au.preservesPitch = true;
   au.playbackRate = +st.speed || 1;
   baseVol();
   $("dT").textContent = t.title;
@@ -1702,11 +1757,21 @@ async function play() {
     if (i === undefined) return;
     if (!await load(i)) return;
   }
-  try { await au.play(); } catch (e) { console.error(e); }
+  try {
+    await au.play();
+    if (tracks[cur]) media(tracks[cur]);
+    requestWakeLock();
+  } catch (e) {
+    console.error(e);
+  }
   syncIcons();
 }
 
-function pause() { au.pause(); syncIcons(); }
+function pause() {
+  au.pause();
+  releaseWakeLock();
+  syncIcons();
+}
 
 function syncIcons() {
   const icon = au.paused ? "▶" : "❚❚";
@@ -1763,10 +1828,11 @@ au.onended = () => {
     sleepEndOfTrack = false;
     $("sleepTimerSelect").value = "0";
     $("sleepCountdown").textContent = "";
+    releaseWakeLock();
     syncIcons();
     return;
   }
-  if (st.autoplay) go(1); else syncIcons();
+  if (st.autoplay) go(1); else { releaseWakeLock(); syncIcons(); }
 };
 au.onerror = () => { if (!busy && tracks[cur]) go(1); };
 
@@ -1805,7 +1871,7 @@ $("repBtn").onclick = () => {
   sync();
 };
 
-/* MEDIA SESSION WITH AIRPODS & boAt BLUETOOTH EARBUD TRIGGER */
+/* MEDIA SESSION WITH ARTWORK + AIRPODS / boAt EARBUD GESTURE */
 let lastEarbudTap = 0;
 
 function triggerVoiceFromEarbud() {
@@ -1814,10 +1880,17 @@ function triggerVoiceFromEarbud() {
 
 function media(t) {
   if (!("mediaSession" in navigator)) return;
+  const icon192 = new URL("./icon-192.png", location.href).href;
+  const icon512 = new URL("./icon-512.png", location.href).href;
+
   navigator.mediaSession.metadata = new MediaMetadata({
     title: t.title,
     artist: t.director,
-    album: "Rishi Music"
+    album: "Rishi Music",
+    artwork: [
+      { src: icon192, sizes: "192x192", type: "image/png" },
+      { src: icon512, sizes: "512x512", type: "image/png" }
+    ]
   });
 
   const handleEarbudPlayPause = action => {
@@ -2483,7 +2556,7 @@ $("startHybridVoiceBtn").onclick = () => { $("sm").classList.remove("open"); sta
 $("testVoiceBtn").onclick = () => {
   speakDj(st.voiceLang === "ta-IN"
     ? "வணக்கம்! நான் உங்கள் ரிஷி மியூசிக் குரல் உதவியாளர்."
-    : "Hello! I am Rishi, connected to your AirPods with clean original audio.");
+    : "Hello! I am Rishi, playing original studio audio.");
 };
 
 $("rvdj-lang-toggle").onclick = () => {
@@ -2681,7 +2754,13 @@ installBtn.onclick = async () => {
 };
 addEventListener("appinstalled", () => { LS.setItem("rishi_pwa_installed", "true"); installBtn.style.display = "none"; });
 
-/* KEEP MEDIA SESSION SYNCED IN BACKGROUND */
+/* KEEP MEDIA SESSION & WAKE LOCK ACTIVE WHEN SWITCHING APPS */
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && !au.paused) {
+    requestWakeLock();
+  }
+});
+
 setInterval(() => {
   if (!au.paused && "mediaSession" in navigator && isFinite(au.duration) && au.duration > 0) {
     try {
@@ -2694,7 +2773,7 @@ setInterval(() => {
   }
 }, 2000);
 
-/* 14. INIT */
+/* 14. INIT & HIDE SPLASH */
 apply();
 sync();
 
@@ -2715,6 +2794,12 @@ initDB().then(async () => {
 }).catch(e => {
   console.error(e);
   alert("Unable to open your music library. Please don't clear browser storage.");
+}).finally(() => {
+  const sp = $("app-splash");
+  if (sp) {
+    sp.classList.add("hide");
+    setTimeout(() => sp.remove(), 320);
+  }
 });
 </script>
 
