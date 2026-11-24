@@ -11,7 +11,7 @@
 <meta name="apple-mobile-web-app-title" content="Rishi Music">
 
 <link rel="manifest" href="./manifest.json">
-<link rel="icon" type="image/png" sizes="192x192" href="./icon-192.png">
+<link rel="icon" type="image/png" sizes="512x512" href="./icon-512.png">
 <link rel="apple-touch-icon" href="./icon-512.png">
 
 <title>RISHI MUSIC</title>
@@ -49,36 +49,6 @@ body {
   font:15px system-ui,-apple-system,"Noto Sans Tamil",sans-serif;
   padding:0 14px 205px;
   transition:background .25s,color .25s;
-}
-
-/* INSTANT BRAND SPLASH OVERLAY */
-#app-splash {
-  position:fixed;
-  inset:0;
-  z-index:999;
-  background:#070b16;
-  display:flex;
-  flex-direction:column;
-  align-items:center;
-  justify-content:center;
-  gap:14px;
-  transition:opacity .28s ease;
-}
-#app-splash.hide {
-  opacity:0;
-  pointer-events:none;
-}
-#app-splash img {
-  width:112px;
-  height:112px;
-  border-radius:26px;
-  box-shadow:0 12px 32px rgba(29,114,254,.4);
-}
-#app-splash span {
-  font-weight:900;
-  font-size:19px;
-  letter-spacing:1.2px;
-  color:#eef1f8;
 }
 
 header {
@@ -710,12 +680,6 @@ body.compact #rvdj-widget { bottom:calc(90px + env(safe-area-inset-bottom)); }
 </head>
 
 <body>
-
-<!-- BRAND SPLASH SCREEN -->
-<div id="app-splash" aria-hidden="true">
-  <img src="./icon-512.png" alt="Rishi Music">
-  <span>RISHI MUSIC</span>
-</div>
 
 <header>
   <div class="row">
@@ -2773,7 +2737,7 @@ setInterval(() => {
   }
 }, 2000);
 
-/* 14. INIT & HIDE SPLASH */
+/* 14. INIT */
 apply();
 sync();
 
@@ -2794,12 +2758,6 @@ initDB().then(async () => {
 }).catch(e => {
   console.error(e);
   alert("Unable to open your music library. Please don't clear browser storage.");
-}).finally(() => {
-  const sp = $("app-splash");
-  if (sp) {
-    sp.classList.add("hide");
-    setTimeout(() => sp.remove(), 320);
-  }
 });
 </script>
 
