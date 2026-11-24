@@ -1,8 +1,12 @@
-const CACHE_NAME = 'rishi-music-gh-v6';
+```javascript
+const CACHE_NAME = 'rishi-music-gh-v5';
 
 const ASSETS_TO_CACHE = [
     './',
     './index.html',
+    './style.css',
+    './app.js',
+    './voice-dj.js',
     './manifest.json',
     './icon-192.png',
     './icon-512.png'
@@ -104,3 +108,4 @@ self.addEventListener('fetch', (event) => {
         })
     );
 });
+```
