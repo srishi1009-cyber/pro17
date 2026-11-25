@@ -1,4 +1,4 @@
-const CACHE_NAME = 'rishi-music-gh-v10';
+const CACHE_NAME = 'rishi-music-gh-v16';
 
 const ASSETS_TO_CACHE = [
     './',
