@@ -917,7 +917,7 @@ body.compact #rvdj-widget { bottom:calc(90px + env(safe-area-inset-bottom)); }
     </div>
     <div class="lyrics-settings-box">
       <div class="sb" id="offlineModelStatus" style="margin-bottom:8px;font-weight:700;line-height:1.5">
-        ✅ Original Studio Sound Active (Background Playback Guard Enabled)
+        ✅ Original Studio Sound Active (24-Hour Background Keep-Alive Enabled)
       </div>
       <div class="row" style="flex-wrap:wrap">
         <button type="button" class="btn pri" id="testVoiceBtn" style="padding:8px 14px;font-size:13px">
@@ -1983,9 +1983,22 @@ $("q").oninput = render;
 $("dir").onchange = render;
 $("viewBtn").onclick = () => { set({ view: st.view === "grid" ? "list" : "grid" }); render(); };
 
-/* 9. PLAYBACK ENGINE (PURE HARDWARE AUDIO + BACKGROUND WAKE LOCK + MEDIASESSION ARTWORK) */
+/* 9. PLAYBACK ENGINE (PURE HARDWARE AUDIO + 24-HOUR BACKGROUND KEEP-ALIVE) */
 let pre = null;
 let wakeLock = null;
+let userPaused = true;
+let mediaArtDataUrl = null;
+
+/* Pre-load icon-512.png as an inline Data URL so MediaSession notification never stalls in background */
+fetch("./icon-512.png")
+  .then(r => r.ok ? r.blob() : null)
+  .then(blob => {
+    if (!blob) return;
+    const fr = new FileReader();
+    fr.onload = () => { mediaArtDataUrl = fr.result; };
+    fr.readAsDataURL(blob);
+  })
+  .catch(() => {});
 
 async function requestWakeLock() {
   try {
@@ -2001,6 +2014,20 @@ function releaseWakeLock() {
     try { wakeLock.release(); } catch (_) {}
     wakeLock = null;
   }
+}
+
+function syncMediaPosition() {
+  if (!("mediaSession" in navigator)) return;
+  try {
+    navigator.mediaSession.playbackState = au.paused ? "paused" : "playing";
+    if (isFinite(au.duration) && au.duration > 0) {
+      navigator.mediaSession.setPositionState({
+        duration: au.duration,
+        playbackRate: au.playbackRate || 1,
+        position: Math.max(0, Math.min(au.currentTime || 0, au.duration))
+      });
+    }
+  } catch (_) {}
 }
 
 function pickNext(dir = 1) {
@@ -2053,6 +2080,7 @@ async function load(i, preUrl) {
 }
 
 async function play() {
+  userPaused = false;
   if (cur < 0 && tracks.length) {
     compute();
     const i = view.find(i => !hasPlayedToday(tracks[i].id));
@@ -2062,6 +2090,7 @@ async function play() {
   try {
     await au.play();
     if (tracks[cur]) media(tracks[cur]);
+    syncMediaPosition();
     requestWakeLock();
   } catch (e) {
     console.error(e);
@@ -2070,6 +2099,7 @@ async function play() {
 }
 
 function pause() {
+  userPaused = true;
   au.pause();
   releaseWakeLock();
   syncIcons();
@@ -2120,7 +2150,14 @@ function prevTrack() {
 let lastSave = 0;
 let ended = false;
 
-au.onplay = () => { ended = false; count(); syncIcons(); };
+au.onplay = () => {
+  ended = false;
+  userPaused = false;
+  count();
+  syncMediaPosition();
+  syncIcons();
+};
+au.onloadedmetadata = syncMediaPosition;
 au.onpause = syncIcons;
 au.onended = () => {
   if (ended) return;
@@ -2130,11 +2167,19 @@ au.onended = () => {
     sleepEndOfTrack = false;
     $("sleepTimerSelect").value = "0";
     $("sleepCountdown").textContent = "";
+    userPaused = true;
     releaseWakeLock();
     syncIcons();
     return;
   }
-  if (st.autoplay) go(1); else { releaseWakeLock(); syncIcons(); }
+  if (st.autoplay) {
+    if ("mediaSession" in navigator) navigator.mediaSession.playbackState = "playing";
+    go(1);
+  } else {
+    userPaused = true;
+    releaseWakeLock();
+    syncIcons();
+  }
 };
 au.onerror = () => { if (!busy && tracks[cur]) go(1); };
 
@@ -2160,6 +2205,7 @@ au.ontimeupdate = () => {
 $("bar").oninput = () => {
   if (au.duration) {
     au.currentTime = $("bar").value / 100 * au.duration;
+    syncMediaPosition();
     updateSyncedLyrics(true);
   }
 };
@@ -2182,8 +2228,8 @@ function triggerVoiceFromEarbud() {
 
 function media(t) {
   if (!("mediaSession" in navigator)) return;
-  const icon192 = new URL("./icon-192.png", location.href).href;
-  const icon512 = new URL("./icon-512.png", location.href).href;
+  const icon192 = mediaArtDataUrl || new URL("./icon-192.png", location.href).href;
+  const icon512 = mediaArtDataUrl || new URL("./icon-512.png", location.href).href;
 
   navigator.mediaSession.metadata = new MediaMetadata({
     title: t.title,
@@ -2221,7 +2267,7 @@ function media(t) {
     pause: () => handleEarbudPlayPause(pause),
     nexttrack: () => go(1),
     previoustrack: handleEarbudPrev,
-    seekto: e => { au.currentTime = e.seekTime; }
+    seekto: e => { au.currentTime = e.seekTime; syncMediaPosition(); }
   };
 
   for (const k in h) {
@@ -2259,6 +2305,7 @@ $("list").onclick = async e => {
     await delRec(id);
     const i = tracks.indexOf(t);
     if (i === cur) {
+      userPaused = true;
       au.pause(); au.removeAttribute("src"); cur = -1;
       $("dT").textContent = "No track playing";
       $("dS").textContent = "Select a song from your library";
@@ -2291,7 +2338,7 @@ $("cleanDupesBtn").onclick = async () => {
     await delRec(d.id);
     const idx = tracks.indexOf(d);
     if (idx >= 0) {
-      if (idx === cur) { au.pause(); cur = -1; }
+      if (idx === cur) { userPaused = true; au.pause(); cur = -1; }
       else if (idx < cur) cur--;
       tracks.splice(idx, 1);
     }
@@ -2776,7 +2823,10 @@ function startHybridVoiceDj(targetSearchBar = false) {
 
   updateNetworkModeBadge();
   const wasPlaying = !au.paused;
-  if (wasPlaying) au.pause();
+  if (wasPlaying) {
+    userPaused = true;
+    au.pause();
+  }
   try { window.speechSynthesis.cancel(); } catch (_) {}
 
   if (!navigator.onLine || !SR) {
@@ -3057,22 +3107,23 @@ installBtn.onclick = async () => {
 };
 addEventListener("appinstalled", () => { LS.setItem("rishi_pwa_installed", "true"); installBtn.style.display = "none"; });
 
-/* KEEP MEDIA SESSION & WAKE LOCK ACTIVE WHEN SWITCHING APPS */
+/* 24-HOUR BACKGROUND KEEP-ALIVE & WATCHDOG */
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible" && !au.paused) {
-    requestWakeLock();
+  if (!userPaused && cur >= 0) {
+    if (au.paused && !au.ended && !busy) {
+      au.play().catch(() => {});
+    }
+    syncMediaPosition();
+    if (document.visibilityState === "visible") requestWakeLock();
   }
 });
 
 setInterval(() => {
-  if (!au.paused && "mediaSession" in navigator && isFinite(au.duration) && au.duration > 0) {
-    try {
-      navigator.mediaSession.setPositionState({
-        duration: au.duration,
-        playbackRate: au.playbackRate,
-        position: Math.min(au.currentTime, au.duration)
-      });
-    } catch (_) {}
+  if (!userPaused && cur >= 0) {
+    if (au.paused && !au.ended && !busy) {
+      au.play().catch(() => {});
+    }
+    syncMediaPosition();
   }
 }, 2000);
 
