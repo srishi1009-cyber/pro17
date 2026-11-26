@@ -4,7 +4,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#08090d">
+<meta name="theme-color" content="#070b16">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -20,7 +20,7 @@
 :root {
   --accent:#1d72fe;
   --rgb:29,114,254;
-  --bg:#08090d;
+  --bg:#070b16;
   --card:#141720;
   --text:#eef1f8;
   --mut:#8b93a7;
@@ -37,7 +37,7 @@
   --line:rgba(0,0,0,.09);
 }
 
-* {
+- {
   box-sizing:border-box;
   -webkit-tap-highlight-color:transparent;
 }
@@ -917,7 +917,7 @@ body.compact #rvdj-widget { bottom:calc(90px + env(safe-area-inset-bottom)); }
     </div>
     <div class="lyrics-settings-box">
       <div class="sb" id="offlineModelStatus" style="margin-bottom:8px;font-weight:700;line-height:1.5">
-        ✅ Original Studio Sound Active (48-Hour Smooth Background Playback)
+        ✅ Original Studio Sound Active (24-Hour Background Keep-Alive Enabled)
       </div>
       <div class="row" style="flex-wrap:wrap">
         <button type="button" class="btn pri" id="testVoiceBtn" style="padding:8px 14px;font-size:13px">
@@ -946,6 +946,10 @@ body.compact #rvdj-widget { bottom:calc(90px + env(safe-area-inset-bottom)); }
         <button type="button" class="btn" id="pickLyricsSettingsBtn" style="padding:5px 10px;font-size:12px">🎯 Versions</button>
         <button type="button" class="btn" id="clearLyricsBtn" style="padding:5px 10px;font-size:12px">🗑️ Clear</button>
         <button type="button" class="btn pri" id="importLrcBtn" style="padding:5px 10px;font-size:12px">📂 .lrc</button>
+      </div>
+      <div class="row" style="margin-bottom:8px;justify-content:space-between">
+        <span class="sb" id="savedLyricsCount">0 songs saved offline</span>
+        <button type="button" class="btn pri" id="syncAllLyricsBtn" style="padding:5px 12px;font-size:12px">⚡ Sync All Offline</button>
       </div>
       <div class="lyrics-live-preview" id="settingsLiveLyric">Play any song to show synced lyrics</div>
       <div class="lyrics-scroll-box" id="settingsLyricsList"></div>
@@ -1276,7 +1280,7 @@ function apply() {
   R.style.setProperty("--accent", st.accent);
   R.style.setProperty("--rgb", rgbOf(st.accent).join(","));
   $("theme").value = st.theme;
-  document.querySelector('meta[name=theme-color]').content = dark ? "#08090d" : "#f4f7fb";
+  document.querySelector('meta[name=theme-color]').content = dark ? "#070b16" : "#f4f7fb";
   document.body.classList.toggle("compact", st.compact);
   document.body.classList.toggle("noart", !st.art);
   document.body.classList.toggle("hide-lyrics", !st.showLyrics);
@@ -1632,7 +1636,7 @@ function scoreLyricCandidate(cand, targetTitle, targetArtist, trackDur) {
     const aSkel = skeleton(targetArtist);
     const caSkel = skeleton(candArtist + " " + candAlbum);
     if (aNorm && caNorm.includes(aNorm)) score += 65;
-    else if (aSkel && caSkel.includes(caSkel)) score += 50;
+    else if (aSkel && caSkel.includes(aSkel)) score += 50;
   }
 
   if (trackDur > 0 && cand.duration > 0) {
