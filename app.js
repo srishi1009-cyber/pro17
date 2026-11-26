@@ -92,6 +92,7 @@ let pendingImportFiles = [];
 const BATCH_SIZE = 40;
 let renderedCount = 0;
 let filteredTrackIndices = [];
+let wakeLock = null;
 
 /* 4. DOM */
 const audio = document.getElementById("audioEl");
@@ -176,32 +177,104 @@ function getNextUnplayedIndex() {
     return unplayed[Math.floor(Math.random() * unplayed.length)];
 }
 
-/* 6. MEDIA SESSION */
+/* 6. UNKILLABLE BACKGROUND ENGINE + AIRPODS / BOAT ROCKERZ MEDIA SESSION */
+async function requestWakeLock() {
+    try {
+        if ("wakeLock" in navigator && !wakeLock) {
+            wakeLock = await navigator.wakeLock.request("screen");
+            wakeLock.addEventListener("release", function () { wakeLock = null; });
+        }
+    } catch (_) {}
+}
+
+function syncMediaPosition() {
+    if (!("mediaSession" in navigator)) return;
+    try {
+        navigator.mediaSession.playbackState = audio.paused ? "paused" : "playing";
+        if (Number.isFinite(audio.duration) && audio.duration > 0) {
+            navigator.mediaSession.setPositionState({
+                duration: audio.duration,
+                playbackRate: audio.playbackRate || 1,
+                position: Math.max(0, Math.min(audio.currentTime || 0, audio.duration))
+            });
+        }
+    } catch (_) {}
+}
+
+function registerMediaHandlers() {
+    if (!("mediaSession" in navigator)) return;
+    const handlers = {
+        play: function () {
+            userManuallyPaused = false;
+            playCurrentTrack();
+        },
+        pause: function () {
+            pauseCurrentTrack();
+        },
+        stop: function () {
+            pauseCurrentTrack();
+        },
+        nexttrack: function () {
+            userManuallyPaused = false;
+            advanceToNextTrack();
+        },
+        previoustrack: function () {
+            userManuallyPaused = false;
+            playPreviousTrack();
+        },
+        seekto: function (e) {
+            if (e.seekTime != null && Number.isFinite(e.seekTime)) {
+                audio.currentTime = e.seekTime;
+                syncMediaPosition();
+            }
+        },
+        seekforward: function (e) {
+            audio.currentTime = Math.min(audio.duration || 0, audio.currentTime + (e.seekOffset || 10));
+            syncMediaPosition();
+        },
+        seekbackward: function (e) {
+            audio.currentTime = Math.max(0, audio.currentTime - (e.seekOffset || 10));
+            syncMediaPosition();
+        }
+    };
+
+    Object.keys(handlers).forEach(function (action) {
+        try {
+            navigator.mediaSession.setActionHandler(action, handlers[action]);
+        } catch (_) {}
+    });
+}
+
 function updateMediaSession(track) {
     if (!("mediaSession" in navigator) || !track) return;
     try {
-        navigator.mediaSession.metadata = new MediaMetadata({ title: track.title, artist: track.director, album: "Rishi Music" });
-        navigator.mediaSession.setActionHandler("play", function () { userManuallyPaused = false; playCurrentTrack(); });
-        navigator.mediaSession.setActionHandler("pause", function () { pauseCurrentTrack(); });
-        navigator.mediaSession.setActionHandler("nexttrack", function () { userManuallyPaused = false; advanceToNextTrack(); });
-        navigator.mediaSession.setActionHandler("previoustrack", function () { userManuallyPaused = false; playPreviousTrack(); });
-        navigator.mediaSession.setActionHandler("seekto", function (e) {
-            if (e.seekTime && Number.isFinite(e.seekTime)) audio.currentTime = e.seekTime;
+        navigator.mediaSession.metadata = new MediaMetadata({
+            title: track.title,
+            artist: track.director,
+            album: "Rishi Music",
+            artwork: [{ src: "./icon-512.png", sizes: "512x512", type: "image/png" }]
         });
+        registerMediaHandlers();
+        syncMediaPosition();
     } catch (e) { console.warn("MediaSession error:", e); }
 }
 
-/* 7. PLAYBACK */
+/* 7. SMOOTH STUTTER-FREE PLAYBACK */
 async function loadTrackSource(index) {
     if (index < 0 || index >= tracks.length) return false;
     currentTrackIndex = index;
     const track = tracks[currentTrackIndex];
-    if (currentBlobUrl) { URL.revokeObjectURL(currentBlobUrl); currentBlobUrl = null; }
     const blob = await getTrackAudioBlob(track.id);
     if (!blob) { console.error("Audio data missing for track:", track); return false; }
-    currentBlobUrl = URL.createObjectURL(blob);
-    audio.pause();
-    audio.src = currentBlobUrl;
+
+    const nextUrl = URL.createObjectURL(blob);
+    audio.preload = "auto";
+    audio.src = nextUrl;
+    if (currentBlobUrl) {
+        URL.revokeObjectURL(currentBlobUrl);
+    }
+    currentBlobUrl = nextUrl;
+
     audio.playbackRate = Number(appSettings.speed) || 1;
     dockTitle.textContent = track.title;
     dockSubtitle.textContent = track.director;
@@ -228,7 +301,8 @@ async function playCurrentTrack() {
     try {
         await audio.play();
         setPlayIconState(true);
-        if ("mediaSession" in navigator) navigator.mediaSession.playbackState = "playing";
+        syncMediaPosition();
+        requestWakeLock();
         renderTrackList(false);
     } catch (error) {
         console.warn("Playback prevented or deferred:", error);
@@ -240,7 +314,7 @@ function pauseCurrentTrack() {
     userManuallyPaused = true;
     audio.pause();
     setPlayIconState(false);
-    if ("mediaSession" in navigator) navigator.mediaSession.playbackState = "paused";
+    syncMediaPosition();
     renderTrackList(false);
 }
 
@@ -278,7 +352,7 @@ async function playPreviousTrack() {
     }
 }
 
-/* 8. AUDIO EVENTS */
+/* 8. AUDIO EVENTS & 3-DAY BACKGROUND RECOVERY */
 audio.addEventListener("ended", function () {
     if (userManuallyPaused || isSwitchingSong) return;
     const t = tracks[currentTrackIndex];
@@ -291,13 +365,19 @@ audio.addEventListener("error", function () {
     advanceToNextTrack();
 });
 
+// Auto-resume if OS background manager pauses audio without user pressing pause/AirPods
 audio.addEventListener("pause", function () {
+    syncMediaPosition();
     if (!userManuallyPaused && !audio.ended && !isSwitchingSong) {
         setTimeout(function () {
-            if (!userManuallyPaused && audio.paused) audio.play().catch(function () {});
-        }, 400);
+            if (!userManuallyPaused && audio.paused) {
+                audio.play().then(syncMediaPosition).catch(function () {});
+            }
+        }, 300);
     }
 });
+
+audio.addEventListener("loadedmetadata", syncMediaPosition);
 
 audio.addEventListener("timeupdate", function () {
     if (!audio.duration) return;
@@ -307,7 +387,29 @@ audio.addEventListener("timeupdate", function () {
 });
 
 progressBar.addEventListener("input", function () {
-    if (audio.duration) audio.currentTime = (Number(progressBar.value) / 100) * audio.duration;
+    if (audio.duration) {
+        audio.currentTime = (Number(progressBar.value) / 100) * audio.duration;
+        syncMediaPosition();
+    }
+});
+
+// 3-Day Background Keep-Alive Watchdog
+setInterval(function () {
+    if (!userManuallyPaused && currentTrackIndex >= 0) {
+        if (audio.paused && !audio.ended && !isSwitchingSong) {
+            audio.play().catch(function () {});
+        }
+        syncMediaPosition();
+    }
+}, 2000);
+
+document.addEventListener("visibilitychange", function () {
+    if (document.visibilityState === "visible" && !userManuallyPaused && currentTrackIndex >= 0) {
+        requestWakeLock();
+        if (audio.paused && !audio.ended) {
+            audio.play().catch(function () {});
+        }
+    }
 });
 
 function formatTime(sec) {
@@ -437,11 +539,10 @@ tracksContainer.addEventListener("click", async function (e) {
         await removeTrackFromDB(track.id);
         const idx = tracks.indexOf(track);
         if (idx === currentTrackIndex) {
-            audio.pause();
+            pauseCurrentTrack();
             currentTrackIndex = -1;
             dockTitle.textContent = "No track playing";
             dockSubtitle.textContent = "Select a song from your library";
-            setPlayIconState(false);
         } else if (idx < currentTrackIndex) {
             currentTrackIndex--;
         }
@@ -470,6 +571,7 @@ saveEditBtn.addEventListener("click", async function () {
     if (tracks[currentTrackIndex] && tracks[currentTrackIndex].id === track.id) {
         dockTitle.textContent = track.title;
         dockSubtitle.textContent = track.director;
+        updateMediaSession(track);
     }
     editModal.classList.remove("open");
     activeEditingTrackId = null;
@@ -1025,7 +1127,7 @@ initDB().then(async function () {
             if (djRec) { try { djRec.stop(); } catch (_) {} }
 
             djRec = new SR();
-            djRec.lang = "ta-IN"; // Understands both Tamil & English
+            djRec.lang = "ta-IN";
             djRec.interimResults = false;
             djRec.maxAlternatives = 3;
 
@@ -1073,7 +1175,7 @@ initDB().then(async function () {
                     });
                 } else {
                     speakDj("I couldn't find " + primary + ". Try another song, director, or mood?", function () {
-                        listenTurn(); // Alexa-style follow-up listening turn
+                        listenTurn();
                     });
                 }
             };
@@ -1140,7 +1242,7 @@ initDB().then(async function () {
         if (liveLyricRec) return;
 
         liveLyricRec = new SR();
-        liveLyricRec.lang = "ta-IN"; // Recognises Tamil & English singing
+        liveLyricRec.lang = "ta-IN";
         liveLyricRec.continuous = true;
         liveLyricRec.interimResults = true;
 
@@ -1423,7 +1525,7 @@ initDB().then(async function () {
         };
     }
 
-    /* Queue (has priority over daily random pick) */
+    /* Queue */
     function addToQueue(id) {
         if (!tracks.some(function (t) { return t.id === id; })) return;
         if (featureData.queue.indexOf(id) < 0) featureData.queue.push(id);
@@ -1684,7 +1786,7 @@ initDB().then(async function () {
         }
     });
 
-    /* Lock-screen artwork */
+    /* Lock-screen artwork + keep AirPods/boAt handlers bound */
     const oldMediaUpdate = updateMediaSession;
     updateMediaSession = function (track) {
         oldMediaUpdate(track);
@@ -1692,9 +1794,14 @@ initDB().then(async function () {
         try {
             const m = metaFor(track.id);
             navigator.mediaSession.metadata = new MediaMetadata({
-                title: track.title, artist: track.director, album: "Rishi Music",
-                artwork: m.art ? [{ src: m.art, sizes: "256x256", type: "image/jpeg" }] : []
+                title: track.title,
+                artist: track.director,
+                album: "Rishi Music",
+                artwork: m.art
+                    ? [{ src: m.art, sizes: "256x256", type: "image/jpeg" }]
+                    : [{ src: "./icon-512.png", sizes: "512x512", type: "image/png" }]
             });
+            registerMediaHandlers();
         } catch (e) { console.warn("Lock-screen artwork unavailable:", e); }
     };
 
