@@ -1,4 +1,4 @@
-const CACHE_NAME = 'rishi-music-gh-v18';
+const CACHE_NAME = 'rishi-music-gh-v19';
 
 const ASSETS_TO_CACHE = [
     './',
@@ -11,7 +11,10 @@ const ASSETS_TO_CACHE = [
 self.addEventListener('install', (event) => {
     event.waitUntil(
         caches.open(CACHE_NAME).then(async (cache) => {
-            await cache.addAll(ASSETS_TO_CACHE);
+            // Resilient caching: prevents one missing/delayed icon from failing the whole service worker
+            await Promise.allSettled(
+                ASSETS_TO_CACHE.map(url => cache.add(url).catch(err => console.warn('Failed to cache:', url, err)))
+            );
         })
     );
     self.skipWaiting();
