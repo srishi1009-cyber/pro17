@@ -1,74 +1,75 @@
-const CACHE_NAME = 'rishi-music-gh-v21';
+ {
 
-const ASSETS_TO_CACHE = [
-    './',
-    './index.html',
-    './manifest.json',
-    './icon-192.png',
-    './icon-512.png'
-];
+"id": "./index.html",
 
-self.addEventListener('install', (event) => {
-    event.waitUntil(
-        caches.open(CACHE_NAME).then(async (cache) => {
-            await cache.addAll(ASSETS_TO_CACHE);
-        })
-    );
-    self.skipWaiting();
-});
+"name": "Rishi Music",
 
-self.addEventListener('activate', (event) => {
-    event.waitUntil(
-        caches.keys().then((keys) =>
-            Promise.all(
-                keys.map((key) => {
-                    if (key.startsWith('rishi-music-') && key !== CACHE_NAME) {
-                        return caches.delete(key);
-                    }
-                })
-            )
-        )
-    );
-    self.clients.claim();
-});
+"short_name": "Rishi Music",
 
-self.addEventListener('fetch', (event) => {
-    const request = event.request;
-    if (request.method !== 'GET') return;
+"description": "Personal audio station",
 
-    const url = new URL(request.url);
-    if (url.origin !== self.location.origin) return;
-    if (url.protocol === 'data:' || url.protocol === 'blob:') return;
+"start_url": "./index.html",
 
-    event.respondWith(
-        caches.match(request).then(async (cachedResponse) => {
-            if (cachedResponse) return cachedResponse;
+"scope": "./",
 
-            try {
-                const networkResponse = await fetch(request);
-                if (networkResponse && networkResponse.ok) {
-                    const cache = await caches.open(CACHE_NAME);
-                    if (
-                        request.destination === 'script' ||
-                        request.destination === 'style' ||
-                        request.destination === 'document' ||
-                        request.destination === 'image' ||
-                        request.destination === 'font' ||
-                        url.pathname.endsWith('.json')
-                    ) {
-                        await cache.put(request, networkResponse.clone());
-                    }
-                }
-                return networkResponse;
-            } catch (error) {
-                if (request.mode === 'navigate') {
-                    return caches.match('./index.html');
-                }
-                return new Response('Offline', {
-                    status: 503,
-                    headers: { 'Content-Type': 'text/plain' }
-                });
-            }
-        })
-    );
-});
+"display": "standalone",
+
+"orientation": "portrait",
+
+"background_color": "#070b16",
+
+"theme_color": "#070b16",
+
+"icons": [
+
+{
+
+"src": "./icon-192.png",
+
+"sizes": "192x192",
+
+"type": "image/png",
+
+"purpose": "any"
+
+},
+
+{
+
+"src": "./icon-192.png",
+
+"sizes": "192x192",
+
+"type": "image/png",
+
+"purpose": "maskable"
+
+},
+
+{
+
+"src": "./icon-512.png",
+
+"sizes": "512x512",
+
+"type": "image/png",
+
+"purpose": "any"
+
+},
+
+{
+
+"src": "./icon-512.png",
+
+"sizes": "512x512",
+
+"type": "image/png",
+
+"purpose": "maskable"
+
+}
+
+]
+
+}
