@@ -1,7 +1,7 @@
 "use strict";
 
 /* ============================================================
-   RISHI MUSIC — FULL ENGINE (merged + fixed + AI Voice DJ + Live AI Lyrics)
+   RISHI MUSIC — FULL ENGINE (Co-Play Over Video + AI Voice DJ + Live AI Lyrics)
    ============================================================ */
 
 /* 1. SERVICE WORKER */
@@ -259,7 +259,7 @@ function updateMediaSession(track) {
     } catch (e) { console.warn("MediaSession error:", e); }
 }
 
-/* 7. SMOOTH STUTTER-FREE PLAYBACK */
+/* 7. SMOOTH CO-PLAYBACK ENGINE (KEEPS PLAYING EVEN OVER OTHER APPS & VIDEOS) */
 async function loadTrackSource(index) {
     if (index < 0 || index >= tracks.length) return false;
     currentTrackIndex = index;
@@ -352,7 +352,7 @@ async function playPreviousTrack() {
     }
 }
 
-/* 8. AUDIO EVENTS & 3-DAY BACKGROUND RECOVERY */
+/* 8. AUDIO EVENTS & AGGRESSIVE VIDEO/APP FOCUS OVERRIDE */
 audio.addEventListener("ended", function () {
     if (userManuallyPaused || isSwitchingSong) return;
     const t = tracks[currentTrackIndex];
@@ -365,15 +365,25 @@ audio.addEventListener("error", function () {
     advanceToNextTrack();
 });
 
-// Auto-resume if OS background manager pauses audio without user pressing pause/AirPods
+// Immediately reclaim audio playback if another app or video tries to steal focus
+function reclaimPlaybackFocus() {
+    if (!userManuallyPaused && !audio.ended && !isSwitchingSong && currentTrackIndex >= 0) {
+        if (audio.paused) {
+            audio.play().then(function () {
+                setPlayIconState(true);
+                syncMediaPosition();
+            }).catch(function () {});
+        }
+    }
+}
+
 audio.addEventListener("pause", function () {
-    syncMediaPosition();
     if (!userManuallyPaused && !audio.ended && !isSwitchingSong) {
-        setTimeout(function () {
-            if (!userManuallyPaused && audio.paused) {
-                audio.play().then(syncMediaPosition).catch(function () {});
-            }
-        }, 300);
+        // Retry quickly at 150ms and 600ms so video apps cannot keep it paused
+        setTimeout(reclaimPlaybackFocus, 150);
+        setTimeout(reclaimPlaybackFocus, 600);
+    } else {
+        syncMediaPosition();
     }
 });
 
@@ -393,22 +403,24 @@ progressBar.addEventListener("input", function () {
     }
 });
 
-// 3-Day Background Keep-Alive Watchdog
+// Continuous 1-Second Watchdog: keeps music playing over videos & background apps
 setInterval(function () {
     if (!userManuallyPaused && currentTrackIndex >= 0) {
-        if (audio.paused && !audio.ended && !isSwitchingSong) {
-            audio.play().catch(function () {});
-        }
+        reclaimPlaybackFocus();
         syncMediaPosition();
     }
-}, 2000);
+}, 1000);
 
 document.addEventListener("visibilitychange", function () {
-    if (document.visibilityState === "visible" && !userManuallyPaused && currentTrackIndex >= 0) {
-        requestWakeLock();
-        if (audio.paused && !audio.ended) {
-            audio.play().catch(function () {});
-        }
+    if (!userManuallyPaused && currentTrackIndex >= 0) {
+        if (document.visibilityState === "visible") requestWakeLock();
+        reclaimPlaybackFocus();
+    }
+});
+
+window.addEventListener("blur", function () {
+    if (!userManuallyPaused && currentTrackIndex >= 0) {
+        setTimeout(reclaimPlaybackFocus, 200);
     }
 });
 
