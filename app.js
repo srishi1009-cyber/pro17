@@ -683,7 +683,7 @@ if (installTriggerBtn) {
 
 /* 14. SETTINGS */
 const SETTINGS_KEY = "rishi_settings_v1";
-const DEFAULT_SETTINGS = { theme: "dark", accent: "#1d72fe", speed: 1, volume: 100 };
+const DEFAULT_SETTINGS = { theme: "dark", accent: "#00d2ff", speed: 1, volume: 100 };
 let appSettings = loadAppSettings();
 
 function loadAppSettings() {
@@ -701,7 +701,7 @@ function hexToRgb(hex) {
     const clean = String(hex).replace("#", "");
     const full = clean.length === 3 ? clean.split("").map(function (c) { return c + c; }).join("") : clean;
     const n = parseInt(full, 16);
-    if (!Number.isFinite(n)) return "29,114,254";
+    if (!Number.isFinite(n)) return "0,210,255";
     return ((n >> 16) & 255) + "," + ((n >> 8) & 255) + "," + (n & 255);
 }
 
@@ -712,7 +712,7 @@ function applyAppSettings() {
     audio.playbackRate = Number(appSettings.speed) || 1;
     audio.volume = Math.max(0, Math.min(1, Number(appSettings.volume) / 100));
     const meta = document.querySelector('meta[name="theme-color"]');
-    if (meta) meta.content = appSettings.theme === "light" ? "#f4f7fb" : "#08090d";
+    if (meta) meta.content = appSettings.theme === "light" ? "#f0f7ff" : "#030814";
 }
 
 const settingsModal = document.getElementById("settingsModal");
@@ -789,7 +789,7 @@ if (accentHex) accentHex.addEventListener("change", function () {
         updateSetting({ accent: normalized });
     } else {
         accentHex.value = appSettings.accent.toUpperCase();
-        alert("Enter a valid HEX colour, such as #1D72FE.");
+        alert("Enter a valid HEX colour, such as #00D2FF.");
     }
 });
 
