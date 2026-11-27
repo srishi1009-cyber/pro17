@@ -1,7 +1,7 @@
 "use strict";
 
 /* ============================================================
-   RISHI VOICE DJ — THEME-AWARE ACCENT + SMART CONDITIONAL MOOD
+   RISHI VOICE DJ — THEME-AWARE ACCENT + CONDITIONAL MOOD FLOW
    Connects directly to index.html (#sm, #dock, window.RishiBridge)
    ============================================================ */
 (function initRishiVoiceDJ() {
@@ -357,7 +357,7 @@
 
     const queryLower = cleaned.toLowerCase();
 
-    // 1. Check if user specified a mood (used when waiting for mood)
+    // 1. Check if user specified a mood (used when waiting for mood response)
     for (const [mood, keywords] of Object.entries(MOOD_DICTIONARY)) {
       if (keywords.some(k => queryLower.includes(k))) {
         const moodMatches = [];
@@ -472,8 +472,8 @@
       return;
     }
 
-    // ONLY IF VAGUE / GENERIC ("play a song"), ask for the mood
-    if (/^(play\s+a\s+song|play\s+music|play\s+anything|play|பாட்டு\s+போடு)$/.test(cmd)) {
+    // ONLY IF VAGUE / GENERIC ("play a song", "play song", "play some song"), ask for the mood
+    if (/^(play\s+(a|some)?\s*songs?|play\s+music|play\s+anything|play|பாட்டு\s+போடு)$/.test(cmd)) {
       waitingForMood = true;
       speakRishi(isTa ? "நிச்சயமாக! உங்கள் மனநிலை என்ன? (Happy, sad, romantic, chill, mass)" : "Sure! What mood are you in? Happy, sad, romantic, chill, or mass?", () => {
         setTimeout(() => {
