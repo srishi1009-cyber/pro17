@@ -1,7 +1,7 @@
 "use strict";
 
 /* ============================================================
-   RISHI MUSIC — SMOOTH ENGINE (Stutter-Free + Optimized Audio Playback)
+   RISHI MUSIC — FULL ENGINE (merged + fixed + AI Voice DJ + Live AI Lyrics)
    ============================================================ */
 
 /* 1. SERVICE WORKER */
@@ -177,7 +177,7 @@ function getNextUnplayedIndex() {
     return unplayed[Math.floor(Math.random() * unplayed.length)];
 }
 
-/* 6. BACKGROUND & MEDIA SESSION */
+/* 6. UNKILLABLE BACKGROUND ENGINE + AIRPODS / BOAT ROCKERZ MEDIA SESSION */
 async function requestWakeLock() {
     try {
         if ("wakeLock" in navigator && !wakeLock) {
@@ -243,7 +243,6 @@ async function loadTrackSource(index) {
     const blob = await getTrackAudioBlob(track.id);
     if (!blob) { console.error("Audio data missing for track:", track); return false; }
 
-    // Clean up previous blob URL to prevent memory leaks and stutter
     if (currentBlobUrl) {
         URL.revokeObjectURL(currentBlobUrl);
         currentBlobUrl = null;
@@ -252,7 +251,7 @@ async function loadTrackSource(index) {
     currentBlobUrl = URL.createObjectURL(blob);
     audio.preload = "auto";
     audio.src = currentBlobUrl;
-    audio.load(); // Force buffer reset for smooth original sound
+    audio.load();
 
     audio.playbackRate = Number(appSettings.speed) || 1;
     dockTitle.textContent = track.title;
@@ -855,6 +854,5 @@ initDB().then(async function () {
 
     function currentTrack() { return currentTrackIndex >= 0 ? tracks[currentTrackIndex] : null; }
     
-    // Core feature UI integration hooks initialized cleanly
     updateDashboard();
 })();
