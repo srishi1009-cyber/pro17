@@ -108,6 +108,8 @@
 
   /* ------------------------------------------------------------
    2. DYNAMIC THEME-ACCENTED VOICE DJ WIDGET & ROUND FAB BUTTON
+      The mic symbol is an inline SVG drawn with currentColor, so it
+      always follows the active theme's accent colour (an emoji can't).
      ------------------------------------------------------------ */
   const style = document.createElement("style");
   style.textContent = `
@@ -153,9 +155,9 @@
       color: var(--accent-light);
     }
     .rvdj-lang-pill {
-      border: 1px solid rgba(var(--accent-rgb), 0.4);
-      background: rgba(var(--accent-rgb), 0.25);
-      color: #fff;
+      border: 1px solid rgba(var(--accent-rgb), 0.5);
+      background: rgba(var(--accent-rgb), 0.18);
+      color: var(--accent-light);
       border-radius: 999px;
       padding: 2px 8px;
       font-size: 10px;
@@ -169,20 +171,30 @@
       width: 54px;
       height: 54px;
       border-radius: 50%;
-      border: 1px solid rgba(var(--accent-rgb), 0.7);
-      background: var(--gradient);
-      color: #fff;
-      font-size: 22px;
+      border: 2px solid rgba(var(--accent-rgb), 0.85);
+      background: linear-gradient(145deg, var(--card-light), var(--card));
+      color: var(--accent-light);
       display: grid;
       place-items: center;
       cursor: pointer;
       flex: none;
-      box-shadow: 0 6px 22px rgba(var(--accent-rgb), 0.6), inset 0 1px 2px rgba(255,255,255,.45);
-      transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.3s ease;
+      padding: 0;
+      box-shadow: 0 6px 20px rgba(var(--accent-rgb), 0.45), inset 0 0 12px rgba(var(--accent-rgb), 0.25);
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+    #rvdj-fab svg {
+      width: 26px;
+      height: 26px;
+      display: block;
+      filter: drop-shadow(0 0 5px rgba(var(--accent-rgb), 0.85));
     }
     #rvdj-fab:hover {
       transform: scale(1.08);
-      box-shadow: 0 8px 28px rgba(var(--accent-rgb), 0.8);
+      box-shadow: 0 8px 28px rgba(var(--accent-rgb), 0.7), inset 0 0 14px rgba(var(--accent-rgb), 0.35);
+    }
+    #rvdj-fab:focus-visible {
+      outline: 2px solid var(--accent-light);
+      outline-offset: 3px;
     }
     #rvdj-widget.listening #rvdj-fab {
       animation: rvdjGlow 1.1s infinite;
@@ -192,8 +204,20 @@
       70%  { box-shadow: 0 0 0 16px rgba(var(--accent-rgb), 0), 0 0 32px rgba(var(--accent-rgb), 1); }
       100% { box-shadow: 0 0 0 0 rgba(var(--accent-rgb), 0), 0 0 24px rgba(var(--accent-rgb), 0.9); }
     }
+    @media (prefers-reduced-motion: reduce) {
+      #rvdj-widget.listening #rvdj-fab { animation: none; }
+    }
   `;
   document.head.appendChild(style);
+
+  const MIC_SVG = `
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+         stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <rect x="9" y="2" width="6" height="12" rx="3"></rect>
+      <path d="M5 11a7 7 0 0 0 14 0"></path>
+      <line x1="12" y1="18" x2="12" y2="22"></line>
+      <line x1="8" y1="22" x2="16" y2="22"></line>
+    </svg>`;
 
   const widget = document.createElement("div");
   widget.id = "rvdj-widget";
@@ -206,9 +230,9 @@
         </button>
       </div>
       <div id="rvdj-heard">Tap mic &amp; speak</div>
-      <div id="rvdj-reply">Try: "Play a song" or song name</div>
+      <div id="rvdj-reply">Try: "Play a song" or a song name</div>
     </div>
-    <button type="button" id="rvdj-fab" title="Rishi Voice DJ">🎙️</button>
+    <button type="button" id="rvdj-fab" title="Rishi Voice DJ" aria-label="Rishi Voice DJ">${MIC_SVG}</button>
   `;
   document.body.appendChild(widget);
 
@@ -333,43 +357,82 @@
 
   /* ------------------------------------------------------------
    5. CONVERSATIONAL MOOD & SMART MATCHING ENGINE
+      "play a song" / "play song" / "play some song"
+          -> asks "What mood are you in?" -> plays a song for that mood
+      any mood (even one not in the list)
+          -> plays a random song
+      a song / movie / director name
+          -> plays it directly, no questions asked
      ------------------------------------------------------------ */
   let waitingForMood = false;
 
   const MOOD_DICTIONARY = {
     happy: ["happy", "joy", "dance", "kuthu", "fun", "upbeat", "festive", "santhosham", "மகிழ்ச்சி", "குத்து"],
     sad: ["sad", "soup", "breakup", "pain", "sogam", "melancholy", "crying", "சோகம்", "வலி"],
-    romantic: ["love", "romance", "kadhal", "melody", "heart", "duet", "cute", "காதல்", "மெலடி"],
+    romantic: ["love", "romance", "romantic", "kadhal", "melody", "heart", "duet", "cute", "காதல்", "மெலடி"],
     chill: ["chill", "relax", "sleep", "night", "calm", "peaceful", "lofi", "அமைதி", "இரவு"],
     mass: ["mass", "action", "hero", "energy", "beats", "peppy", "fire", "மாஸ்", "அடிதடி"]
   };
 
-  function findTracksByMoodOrQuery(queryRaw) {
-    const list = (window.RishiBridge && window.RishiBridge.getTracks()) || [];
-    if (!list.length) return [];
+  // lower-case, drop punctuation the recogniser adds ("Play a song." -> "play a song")
+  const norm = s => String(s || "")
+    .toLowerCase()
+    .replace(/[.,!?;:"“”।]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 
-    const cleaned = queryRaw
-      .replace(/^(hey\s+rishi|rishi|ok\s+rishi|ஹே\s+ரிஷி|ரிஷி)[,\s]*/i, "")
-      .replace(/\b(play|songs?|music|tracks?|by|from|of|the|my|please|podu|paattu|paadal|பாட்டு|பாடல்|பாடல்கள்|போடு)\b/gi, " ")
+  const WAKE_RE = /^(hey\s+rishi|ok\s+rishi|okay\s+rishi|rishi|ஹே\s+ரிஷி|ரிஷி)(\s+|$)/i;
+  const stripWake = s => norm(s).replace(WAKE_RE, "").trim();
+
+  // Words that can appear in a "just play something" request. If nothing
+  // else is left after removing them, the request has no song name in it.
+  const GENERIC_FILLER = /\b(please|can|could|you|will|would|play|put|on|start|some|any|a|an|one|the|song|songs|music|track|tracks|something|anything|me|for|paattu|paadal|podu|hey|ok|okay|rishi)\b|பாட்டு|பாடல்கள்|பாடல்|போடு|ஒரு|இசை|ரிஷி|ஹே/gi;
+
+  function isGenericPlayRequest(text) {
+    const t = stripWake(text);
+    if (!t) return false;
+    if (!/(play|put on|start|song|music|paattu|paadal|podu|பாட்டு|பாடல்|போடு|இசை)/i.test(t)) return false;
+    return t.replace(GENERIC_FILLER, " ").replace(/\s+/g, "") === "";
+  }
+
+  function detectMood(text) {
+    const t = norm(text);
+    for (const [mood, keywords] of Object.entries(MOOD_DICTIONARY)) {
+      if (keywords.some(k => t.includes(k))) return mood;
+    }
+    return null;
+  }
+
+  // Tracks tagged with the mood (by title/director). If none are, use the
+  // whole library so the user always gets a song.
+  function moodPool(mood, list) {
+    const all = list.map((_, i) => i);
+    if (!mood) return all;
+    const kws = MOOD_DICTIONARY[mood];
+    const tagged = all.filter(i => {
+      const combo = `${list[i].title || ""} ${list[i].director || ""}`.toLowerCase();
+      return kws.some(k => combo.includes(k));
+    });
+    return tagged.length ? tagged : all;
+  }
+
+  function pickRandom(pool, list) {
+    const bridge = window.RishiBridge;
+    const cur = bridge && bridge.getCurrentTrack ? bridge.getCurrentTrack() : null;
+    // avoid repeating the song that is already loaded when there is a choice
+    const fresh = cur ? pool.filter(i => list[i].id !== cur.id) : pool;
+    const src = fresh.length ? fresh : pool;
+    return src[Math.floor(Math.random() * src.length)];
+  }
+
+  // Score tracks against a spoken song / movie / director name.
+  function scoreTracksByName(queryRaw, list) {
+    const cleaned = stripWake(queryRaw)
+      .replace(/\b(play|songs?|music|tracks?|by|from|of|the|my|please|podu|paattu|paadal)\b|பாட்டு|பாடல்கள்|பாடல்|போடு/gi, " ")
       .replace(/\s+/g, " ")
       .trim();
     if (!cleaned) return [];
 
-    const queryLower = cleaned.toLowerCase();
-
-    // 1. Check if the input contains a mood keyword
-    for (const [mood, keywords] of Object.entries(MOOD_DICTIONARY)) {
-      if (keywords.some(k => queryLower.includes(k))) {
-        const moodMatches = [];
-        list.forEach((track, idx) => {
-          const combo = (track.title + " " + track.director).toLowerCase();
-          if (keywords.some(k => combo.includes(k))) moodMatches.push(idx);
-        });
-        if (moodMatches.length > 0) return moodMatches;
-      }
-    }
-
-    // 2. Direct track title, movie, or director matching
     const phonetic = tamilToEnglishPhonetic(cleaned);
     const qSkel = skeleton(phonetic);
     const words = phonetic.toLowerCase().replace(/[^a-z0-9]+/g, " ").split(" ").filter(w => w.length >= 2);
@@ -399,59 +462,60 @@
     });
 
     scored.sort((a, b) => b.score - a.score);
-    return scored.map(x => x.idx);
+    return scored;
+  }
+
+  // Best match across all speech-recognition alternatives.
+  function bestNameMatch(transcripts, list) {
+    let best = null;
+    for (const alt of transcripts) {
+      const top = scoreTracksByName(alt, list)[0];
+      if (top && (!best || top.score > best.score)) best = top;
+    }
+    return best;
   }
 
   async function executeVoiceCommand(transcripts) {
     const bridge = window.RishiBridge;
     const list = (bridge && bridge.getTracks()) || [];
     const isTa = prefs.voiceLang === "ta-IN";
-    const primary = transcripts[0] || "";
-    const cmd = primary.toLowerCase().replace(/^(hey\s+rishi|rishi|ok\s+rishi)[,\s]*/i, "").trim();
+    const alts = transcripts.map(stripWake).filter(Boolean);
+    const cmd = alts[0] || "";
 
-    // 1. IF WAITING FOR MOOD: User just told us their mood (e.g., "happy", "sad")
-    if (waitingForMood) {
-      waitingForMood = false;
-      const matchingIndices = findTracksByMoodOrQuery(cmd);
-      if (matchingIndices.length > 0) {
-        // Pick a random song from that mood's pool
-        const pick = matchingIndices[Math.floor(Math.random() * matchingIndices.length)];
-        speakRishi(`Playing a ${cmd} song for you!`, async () => {
-          if (bridge) await bridge.playIndex(pick);
-        });
-        showCard(5000);
-        return;
-      } else {
-        // Fallback if mood keyword wasn't recognized in library
-        const rnd = Math.floor(Math.random() * list.length);
-        speakRishi("Playing a random track for your vibe.", async () => {
-          if (bridge) await bridge.playIndex(rnd);
-        });
-        showCard(5000);
-        return;
-      }
-    }
+    const playAt = (index, message) => {
+      speakRishi(message, async () => {
+        if (bridge) await bridge.playIndex(index);
+      });
+      showCard(5000);
+    };
 
-    // 2. STANDARD PLAYER CONTROLS
+    // 1. PLAYER CONTROLS (always available, even mid-conversation)
     if (/(pause|stop\s+music|stop\s+song|நிறுத்து)/.test(cmd)) {
+      waitingForMood = false;
       au.pause();
       speakRishi(isTa ? "இசை நிறுத்தப்பட்டது." : "Music paused.");
       showCard(4000);
       return;
     }
-    if (/^(resume|continue|play\s+music|தொடர்)$/.test(cmd)) {
+    const wantsResume =
+      /^(resume|continue|தொடர்)$/.test(cmd) ||
+      (/^play\s+music$/.test(cmd) && au.paused && au.currentSrc);
+    if (wantsResume) {
+      waitingForMood = false;
       if ($("play")) $("play").click();
       speakRishi(isTa ? "பாடல் தொடர்கிறது." : "Resuming music.");
       showCard(4000);
       return;
     }
     if (/(next|skip|அடுத்த)/.test(cmd)) {
+      waitingForMood = false;
       if ($("next")) $("next").click();
       speakRishi(isTa ? "அடுத்த பாடல் ஒலிக்கிறது." : "Playing next song.");
       showCard(4000);
       return;
     }
     if (/(previous|prev|back|முந்தைய)/.test(cmd)) {
+      waitingForMood = false;
       if ($("prev")) $("prev").click();
       speakRishi(isTa ? "முந்தைய பாடல்." : "Playing previous song.");
       showCard(4000);
@@ -459,50 +523,63 @@
     }
 
     if (!list.length) {
+      waitingForMood = false;
       speakRishi("Your library is empty. Please import songs first.");
       showCard(4500);
       return;
     }
 
-    // 3. CHECK FOR SPECIFIC SONG OR DIRECTOR NAME FIRST (Direct Play - No Mood Prompt)
-    let matches = [];
-    for (const alt of transcripts) {
-      matches = findTracksByMoodOrQuery(alt);
-      if (matches.length > 0) break;
-    }
-
-    if (matches.length > 0) {
+    // 2. WE JUST ASKED "WHAT MOOD?" -> whatever they said is the mood
+    if (waitingForMood) {
       waitingForMood = false;
-      const pick = matches[0];
-      speakRishi(`Playing ${cleanDisplay(list[pick].title)}`, async () => {
-        if (bridge) await bridge.playIndex(pick);
-      });
-      showCard(5000);
+
+      // if they answered with an exact song name instead, honour that
+      const named = bestNameMatch(alts, list);
+      if (named && named.score >= 100) {
+        playAt(named.idx, `Playing ${cleanDisplay(list[named.idx].title)}`);
+        return;
+      }
+
+      const mood = alts.map(detectMood).find(Boolean) || null;
+      const pick = pickRandom(moodPool(mood, list), list);
+      playAt(pick, mood ? `Playing a ${mood} song for you!` : "Here's a random song for your mood!");
       return;
     }
 
-    // 4. CHECK FOR GENERIC "PLAY A SONG" -> CONVERSATIONAL MOOD PROMPT
-    if (/^(play\s+(a|some)?\s*songs?|play\s+music|play\s+anything|play|பாட்டு\s+போடு)$/.test(cmd)) {
-      waitingForMood = true; // Flag active so next turn is treated as mood
+    // 3. "PLAY A SONG" / "PLAY SONG" / "PLAY SOME SONG" -> ASK THE MOOD
+    if (alts.some(isGenericPlayRequest)) {
+      waitingForMood = true;
       speakRishi(
-        isTa ? "நிச்சயமாக! உங்கள் மனநிலை என்ன? (Happy, sad, romantic, chill, mass)" 
-             : "Sure! What mood are you in? Happy, sad, romantic, chill, or mass?", 
-        () => {
-          setTimeout(() => {
-            if (typeof startListening === "function") startListening();
-          }, 600);
-        }
+        isTa ? "நிச்சயமாக! உங்கள் மனநிலை என்ன? மகிழ்ச்சி, சோகம், காதல், அமைதி, அல்லது மாஸ்?"
+             : "Sure! What mood are you in? Happy, sad, romantic, chill, or mass?",
+        () => setTimeout(startListening, 600)
       );
       showCard(6000);
       return;
     }
 
-    // 5. DEFAULT FALLBACK
-    const rnd = Math.floor(Math.random() * list.length);
-    speakRishi(`Playing ${cleanDisplay(list[rnd].title)}`, async () => {
-      if (bridge) await bridge.playIndex(rnd);
-    });
-    showCard(5500);
+    // 4. A SONG / MOVIE / DIRECTOR NAME -> PLAY IT DIRECTLY
+    const named = bestNameMatch(alts, list);
+    if (named && named.score >= 60) {
+      playAt(named.idx, `Playing ${cleanDisplay(list[named.idx].title)}`);
+      return;
+    }
+
+    // 5. A MOOD WORD IN A FULL REQUEST ("play happy songs")
+    const mood = alts.map(detectMood).find(Boolean) || null;
+    if (mood) {
+      const pick = pickRandom(moodPool(mood, list), list);
+      playAt(pick, `Playing a ${mood} song for you!`);
+      return;
+    }
+
+    // 6. WEAK NAME MATCH, OTHERWISE A RANDOM SONG
+    if (named) {
+      playAt(named.idx, `Playing ${cleanDisplay(list[named.idx].title)}`);
+      return;
+    }
+    const rnd = pickRandom(moodPool(null, list), list);
+    playAt(rnd, isTa ? "அந்த பாடல் கிடைக்கவில்லை. ஒரு பாடலை இசைக்கிறேன்." : "I couldn't find that, so here's a random song.");
   }
 
   /* ------------------------------------------------------------
@@ -515,8 +592,12 @@
     isListening = false;
     widget.classList.remove("listening");
     if (recognition) {
-      try { recognition.abort(); } catch (_) {}
+      const r = recognition;
       recognition = null;
+      // detach first: abort() fires a late "aborted" error that used to
+      // reset the mood prompt and overwrite the reply text
+      r.onstart = r.onresult = r.onerror = r.onend = null;
+      try { r.abort(); } catch (_) {}
     }
   }
 
@@ -536,21 +617,22 @@
     try { window.speechSynthesis.cancel(); } catch (_) {}
 
     const lang = prefs.voiceLang === "ta-IN" ? "ta-IN" : "en-US";
-    recognition = new SR();
-    recognition.lang = lang;
-    recognition.continuous = false;
-    recognition.interimResults = true;
-    recognition.maxAlternatives = 5;
+    const rec = new SR();
+    recognition = rec;
+    rec.lang = lang;
+    rec.continuous = false;
+    rec.interimResults = true;
+    rec.maxAlternatives = 5;
 
-    recognition.onstart = () => {
+    rec.onstart = () => {
       isListening = true;
       widget.classList.add("listening");
       $("rvdj-heard").textContent = lang === "ta-IN" ? "🎙️ கேட்கிறேன்..." : "🎙️ Listening...";
-      $("rvdj-reply").textContent = waitingForMood ? "Tell me your mood (happy, sad...)" : "Say song name or 'Play a song'";
+      $("rvdj-reply").textContent = waitingForMood ? "Tell me your mood (happy, sad...)" : "Say a song name or 'Play a song'";
       showCard();
     };
 
-    recognition.onresult = e => {
+    rec.onresult = e => {
       let interim = "";
       const finalAlts = [];
       for (let i = e.resultIndex; i < e.results.length; i++) {
@@ -569,7 +651,8 @@
       }
     };
 
-    recognition.onerror = () => {
+    rec.onerror = ev => {
+      if (ev && ev.error === "aborted") return;
       stopListening();
       waitingForMood = false;
       $("rvdj-reply").textContent = "Didn't catch that. Tap mic again.";
@@ -577,13 +660,13 @@
       if (wasPlaying && $("play")) $("play").click();
     };
 
-    recognition.onend = () => {
+    rec.onend = () => {
       isListening = false;
       widget.classList.remove("listening");
-      recognition = null;
+      if (recognition === rec) recognition = null;
     };
 
-    try { recognition.start(); } catch (_) { stopListening(); }
+    try { rec.start(); } catch (_) { stopListening(); }
   }
 
   $("rvdj-fab").onclick = startListening;
