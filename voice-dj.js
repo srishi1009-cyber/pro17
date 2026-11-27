@@ -1,7 +1,7 @@
 "use strict";
 
 /* ============================================================
-   RISHI VOICE DJ (LADIES VOICE) + AUTO SYNCED LYRICS
+   RISHI VOICE DJ — SMART DIRECT MATCH + CONDITIONAL MOOD PROMPT
    Connects directly to index.html (#sm, #dock, window.RishiBridge)
    ============================================================ */
 (function initRishiVoiceDJ() {
@@ -17,10 +17,10 @@
 
   let prefs = {
     aiDj: true,
-    voiceGender: "female",   // Default: Ladies (Female) voice
-    voiceLang: "en-US",      // "en-US" | "ta-IN"
+    voiceGender: "female",
+    voiceLang: "en-US",
     liveAiLyrics: true,
-    lyricsLang: "ta-IN",     // "ta-IN" | "en-US"
+    lyricsLang: "ta-IN",
     ...jget("rishi_voice_prefs_v6", {})
   };
   const savePrefs = () => jset("rishi_voice_prefs_v6", prefs);
@@ -29,7 +29,7 @@
   if (!au) return;
 
   /* ------------------------------------------------------------
-     1. TAMIL -> ENGLISH PHONETIC TRANSLITERATION & CLEANERS
+   1. TAMIL -> ENGLISH PHONETIC TRANSLITERATION & CLEANERS
      ------------------------------------------------------------ */
   const TAMIL_VOWELS = {
     "அ": "a", "ஆ": "aa", "இ": "i", "ஈ": "ee", "உ": "u", "ஊ": "oo",
@@ -107,7 +107,7 @@
   }
 
   /* ------------------------------------------------------------
-     2. FLOATING BLUE GLOSSY VOICE DJ BUTTON & CARD
+   2. FLOATING BLUE GLOSSY VOICE DJ BUTTON & CARD
      ------------------------------------------------------------ */
   const style = document.createElement("style");
   style.textContent = `
@@ -201,7 +201,7 @@
         </button>
       </div>
       <div id="rvdj-heard">Tap mic &amp; speak</div>
-      <div id="rvdj-reply">Try: "Play a song" or "Pause"</div>
+      <div id="rvdj-reply">Try saying a song name or "Play a song"</div>
     </div>
     <button type="button" id="rvdj-fab" title="Rishi Voice DJ">🎙️</button>
   `;
@@ -219,7 +219,7 @@
   }
 
   /* ------------------------------------------------------------
-     3. LADIES (FEMALE) & MALE VOICE SYNTHESIS
+   3. VOICE SYNTHESIS (LADIES / MALE)
      ------------------------------------------------------------ */
   let cachedVoices = [];
   function loadVoices() {
@@ -239,14 +239,8 @@
     );
     const list = pool.length ? pool : cachedVoices;
 
-    const femaleKeys = [
-      "female", "woman", "girl", "zira", "samantha", "victoria", "heera",
-      "kalpana", "shruti", "veena", "aria", "jenny", "sfg", "tpc"
-    ];
-    const maleKeys = [
-      "male", "man", "boy", "david", "mark", "ravi", "hemant", "daniel",
-      "alex", "rishi", "prabhat", "guy", "iol", "iom"
-    ];
+    const femaleKeys = ["female", "woman", "girl", "zira", "samantha", "victoria", "heera", "kalpana", "shruti", "veena", "aria", "jenny"];
+    const maleKeys = ["male", "man", "boy", "david", "mark", "ravi", "hemant", "daniel", "alex", "rishi"];
     const keys = gender === "male" ? maleKeys : femaleKeys;
 
     const match = list.find(v => keys.some(k => v.name.toLowerCase().includes(k)));
@@ -278,13 +272,8 @@
       utter.lang = v.lang;
     }
 
-    if (prefs.voiceGender === "male") {
-      utter.pitch = 0.62;
-      utter.rate = 0.95;
-    } else {
-      utter.pitch = 1.42;
-      utter.rate = 1.04;
-    }
+    utter.pitch = prefs.voiceGender === "male" ? 0.62 : 1.42;
+    utter.rate = prefs.voiceGender === "male" ? 0.95 : 1.04;
     utter.volume = 1.0;
 
     let finished = false;
@@ -301,141 +290,55 @@
   }
 
   /* ------------------------------------------------------------
-     4. AUTOMATIC SYNCED LYRICS (LRCLIB + MIC FALLBACK)
+   4. AUTOMATIC SYNCED LYRICS
      ------------------------------------------------------------ */
   const fetchedIds = new Set();
-
   function setLyricsStatus(msg) {
     if ($("liveAiLyricsStatus")) $("liveAiLyricsStatus").textContent = msg;
   }
 
   async function autoFetchLyrics(track) {
     if (!prefs.liveAiLyrics || !track || !window.RishiBridge) return;
-
     const existing = window.RishiBridge.getLyricsForTrack(track.id);
     if (existing && existing.trim()) {
       setLyricsStatus("♪ Synced lyrics active");
       if ($("liveLyricBar")) $("liveLyricBar").style.display = "block";
       return;
     }
-
-    if (fetchedIds.has(track.id)) {
-      startMicLyricsFallback();
-      return;
-    }
+    if (fetchedIds.has(track.id)) return;
     fetchedIds.add(track.id);
 
     const titleClean = cleanDisplay(track.title);
-    const artistClean = track.director && track.director !== "UNKNOWN DIRECTOR"
-      ? cleanDisplay(track.director)
-      : "";
-
-    setLyricsStatus(`🔍 Fetching lyrics for "${titleClean}"...`);
-    if ($("liveLyricBar")) {
-      $("liveLyricBar").style.display = "block";
-      $("liveLyricBar").textContent = `🔍 Finding lyrics for ${titleClean}...`;
-    }
+    const artistClean = track.director && track.director !== "UNKNOWN DIRECTOR" ? cleanDisplay(track.director) : "";
 
     try {
       const q = encodeURIComponent(`${titleClean} ${artistClean}`.trim());
       const res = await fetch(`https://lrclib.net/api/search?q=${q}`);
       if (res.ok) {
         const items = await res.json();
-        const best = Array.isArray(items)
-          ? (items.find(x => x.syncedLyrics) || items.find(x => x.plainLyrics))
-          : null;
-
+        const best = Array.isArray(items) ? (items.find(x => x.syncedLyrics) || items.find(x => x.plainLyrics)) : null;
         if (best && (best.syncedLyrics || best.plainLyrics)) {
           window.RishiBridge.setFullLyrics(track.id, best.syncedLyrics || best.plainLyrics);
-          setLyricsStatus("♪ Synced lyrics loaded automatically");
+          setLyricsStatus("♪ Synced lyrics loaded");
           if ($("liveLyricBar")) $("liveLyricBar").style.display = "block";
-          return;
         }
       }
     } catch (_) {}
-
-    startMicLyricsFallback();
-  }
-
-  let micLyricRec = null;
-  let lastInterim = "";
-  let commitTimer = null;
-
-  function startMicLyricsFallback() {
-    if (!prefs.liveAiLyrics || isListening || au.paused) return;
-    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SR || micLyricRec) return;
-
-    micLyricRec = new SR();
-    micLyricRec.lang = ($("lyricsLangSelect") && $("lyricsLangSelect").value) || prefs.lyricsLang || "ta-IN";
-    micLyricRec.continuous = true;
-    micLyricRec.interimResults = true;
-
-    micLyricRec.onstart = () => setLyricsStatus("🎤 Listening for live lyrics...");
-
-    micLyricRec.onresult = e => {
-      const curTrack = window.RishiBridge && window.RishiBridge.getCurrentTrack();
-      if (au.paused || !curTrack) return;
-
-      let interim = "";
-      for (let i = e.resultIndex; i < e.results.length; i++) {
-        const res = e.results[i];
-        const text = res[0].transcript.trim();
-        if (!text) continue;
-
-        if (res.isFinal) {
-          clearTimeout(commitTimer);
-          lastInterim = "";
-          const sec = au.currentTime || 0;
-          const m = String(Math.floor(sec / 60)).padStart(2, "0");
-          const s = (sec % 60).toFixed(2).padStart(5, "0");
-          window.RishiBridge.appendAutoLyric(curTrack.id, `[${m}:${s}]${text}`);
-        } else {
-          interim = text;
-        }
-      }
-
-      if (interim) {
-        lastInterim = interim;
-        if ($("liveLyricBar")) {
-          $("liveLyricBar").style.display = "block";
-          $("liveLyricBar").textContent = `♪ ${interim}`;
-        }
-        clearTimeout(commitTimer);
-        commitTimer = setTimeout(() => {
-          if (lastInterim && !au.paused) {
-            const sec = au.currentTime || 0;
-            const m = String(Math.floor(sec / 60)).padStart(2, "0");
-            const s = (sec % 60).toFixed(2).padStart(5, "0");
-            window.RishiBridge.appendAutoLyric(curTrack.id, `[${m}:${s}]${lastInterim}`);
-            lastInterim = "";
-          }
-        }, 2800);
-      }
-    };
-
-    micLyricRec.onend = () => {
-      micLyricRec = null;
-      clearTimeout(commitTimer);
-      if (prefs.liveAiLyrics && !au.paused && !isListening) {
-        setTimeout(startMicLyricsFallback, 300);
-      }
-    };
-
-    try { micLyricRec.start(); } catch (_) { micLyricRec = null; }
-  }
-
-  function stopMicLyricsFallback() {
-    clearTimeout(commitTimer);
-    if (micLyricRec) {
-      try { micLyricRec.abort(); } catch (_) {}
-      micLyricRec = null;
-    }
   }
 
   /* ------------------------------------------------------------
-     5. VOICE COMMAND MATCHING & EXECUTION
+   5. SMART MATCHING (Direct song names / directors vs Moods)
      ------------------------------------------------------------ */
+  let waitingForMood = false;
+
+  const MOOD_DICTIONARY = {
+    happy: ["happy", "joy", "dance", "kuthu", "fun", "upbeat", "festive", "santhosham", "மகிழ்ச்சி", "குத்து"],
+    sad: ["sad", "soup", "breakup", "pain", "sogam", "melancholy", "crying", "சோகம்", "வலி"],
+    romantic: ["love", "romance", "kadhal", "melody", "heart", "duet", "cute", "காதல்", "மெலடி"],
+    chill: ["chill", "relax", "sleep", "night", "calm", "peaceful", "lofi", "அமைதி", "இரவு"],
+    mass: ["mass", "action", "hero", "energy", "beats", "peppy", "fire", "மாஸ்", "அடிதடி"]
+  };
+
   function findMatchingIndices(queryRaw) {
     const list = (window.RishiBridge && window.RishiBridge.getTracks()) || [];
     if (!list.length) return [];
@@ -447,6 +350,21 @@
       .trim();
     if (!cleaned) return [];
 
+    const queryLower = cleaned.toLowerCase();
+
+    // 1. Check if user specified a mood (used when waiting for mood)
+    for (const [mood, keywords] of Object.entries(MOOD_DICTIONARY)) {
+      if (keywords.some(k => queryLower.includes(k))) {
+        const moodMatches = [];
+        list.forEach((track, idx) => {
+          const combo = (track.title + " " + track.director).toLowerCase();
+          if (keywords.some(k => combo.includes(k))) moodMatches.push(idx);
+        });
+        if (moodMatches.length > 0) return moodMatches;
+      }
+    }
+
+    // 2. Direct track title, movie, or director matching (Priority!)
     const phonetic = tamilToEnglishPhonetic(cleaned);
     const qSkel = skeleton(phonetic);
     const words = phonetic.toLowerCase().replace(/[^a-z0-9]+/g, " ").split(" ").filter(w => w.length >= 2);
@@ -459,17 +377,17 @@
       const dLow = cleanDisplay(track.director).toLowerCase();
       let score = 0;
 
-      if (qSkel && tSkel === qSkel) score += 120;
-      else if (qSkel && tSkel.includes(qSkel) && qSkel.length >= 3) score += 85;
-      else if (tSkel && qSkel.includes(tSkel) && tSkel.length >= 3) score += 80;
-      if (qSkel && dSkel && (dSkel.includes(qSkel) || qSkel.includes(dSkel)) && qSkel.length >= 3) score += 90;
+      if (qSkel && tSkel === qSkel) score += 150;
+      else if (qSkel && tSkel.includes(qSkel) && qSkel.length >= 3) score += 100;
+      else if (tSkel && qSkel.includes(tSkel) && tSkel.length >= 3) score += 90;
+      if (qSkel && dSkel && (dSkel.includes(qSkel) || qSkel.includes(dSkel)) && qSkel.length >= 3) score += 95;
 
       words.forEach(w => {
         const ws = skeleton(w);
-        if (ws.length >= 3 && tSkel.includes(ws)) score += 25;
-        if (ws.length >= 3 && dSkel.includes(ws)) score += 30;
-        if (tLow.includes(w)) score += 20;
-        if (dLow.includes(w)) score += 25;
+        if (ws.length >= 3 && tSkel.includes(ws)) score += 30;
+        if (ws.length >= 3 && dSkel.includes(ws)) score += 35;
+        if (tLow.includes(w)) score += 25;
+        if (dLow.includes(w)) score += 30;
       });
 
       if (score >= 25) scored.push({ idx, score });
@@ -486,86 +404,43 @@
     const primary = transcripts[0] || "";
     const cmd = primary.toLowerCase().replace(/^(hey\s+rishi|rishi|ok\s+rishi)[,\s]*/i, "").trim();
 
-    if (/(what\s+song|which\s+song|current\s+song|now\s+playing|என்ன\s+பாட்டு)/.test(cmd)) {
-      const cur = bridge && bridge.getCurrentTrack();
-      speakRishi(cur
-        ? (isTa ? `இப்போது ${cleanDisplay(cur.title)} ஒலிக்கிறது.` : `Now playing ${cleanDisplay(cur.title)} by ${cleanDisplay(cur.director)}.`)
-        : (isTa ? "இப்போது எந்தப் பாடலும் ஒலிக்கவில்லை." : "No song is playing right now."));
-      showCard(5000);
-      return;
+    // If we asked for mood and user responded:
+    if (waitingForMood) {
+      waitingForMood = false;
+      const moodMatches = findMatchingIndices(cmd);
+      if (moodMatches.length > 0) {
+        const pick = moodMatches[Math.floor(Math.random() * moodMatches.length)];
+        speakRishi("Playing a song for your mood!", async () => {
+          if (bridge) await bridge.playIndex(pick);
+        });
+        showCard(5000);
+        return;
+      }
     }
 
+    // Standard player control checks
     if (/(pause|stop\s+music|stop\s+song|நிறுத்து)/.test(cmd)) {
       au.pause();
       speakRishi(isTa ? "இசை நிறுத்தப்பட்டது." : "Music paused.");
       showCard(4000);
       return;
     }
-
     if (/^(resume|continue|play\s+music|தொடர்)$/.test(cmd)) {
       if ($("play")) $("play").click();
       speakRishi(isTa ? "பாடல் தொடர்கிறது." : "Resuming music.");
       showCard(4000);
       return;
     }
-
     if (/(next|skip|அடுத்த)/.test(cmd)) {
       if ($("next")) $("next").click();
       speakRishi(isTa ? "அடுத்த பாடல் ஒலிக்கிறது." : "Playing next song.");
       showCard(4000);
       return;
     }
-
     if (/(previous|prev|back|முந்தைய)/.test(cmd)) {
       if ($("prev")) $("prev").click();
       speakRishi(isTa ? "முந்தைய பாடல்." : "Playing previous song.");
       showCard(4000);
-      return;
-    }
-
-    if (/(shuffle|கலக்கு)/.test(cmd)) {
-      if ($("shufBtn") && !$("shufBtn").classList.contains("on")) $("shufBtn").click();
-      if (list.length && bridge) {
-        await bridge.playIndex(Math.floor(Math.random() * list.length));
-      }
-      speakRishi(isTa ? "பிளேலிஸ்ட் ஷஃபிள் செய்யப்பட்டது." : "Playlist shuffled.");
-      showCard(4000);
-      return;
-    }
-
-    if (/(increase\s+volume|volume\s+up|louder|சத்தம்\s+அதிகரி)/.test(cmd)) {
-      const nextVol = Math.min(1, au.volume + 0.2);
-      au.volume = nextVol;
-      const pct = Math.round(nextVol * 100);
-      if ($("vol")) { $("vol").value = pct; $("vol").dispatchEvent(new Event("input")); }
-      speakRishi(`Volume increased to ${pct} percent.`);
-      showCard(4000);
-      return;
-    }
-
-    if (/(decrease\s+volume|volume\s+down|lower\s+volume|சத்தம்\s+குறை)/.test(cmd)) {
-      const nextVol = Math.max(0.1, au.volume - 0.2);
-      au.volume = nextVol;
-      const pct = Math.round(nextVol * 100);
-      if ($("vol")) { $("vol").value = pct; $("vol").dispatchEvent(new Event("input")); }
-      speakRishi(`Volume decreased to ${pct} percent.`);
-      showCard(4000);
-      return;
-    }
-
-    if (/(favou?rite|liked|பிடித்த)/.test(cmd)) {
-      const favIds = jget("rishi_favs", []);
-      const favIdx = list.map((t, i) => i).filter(i => favIds.includes(list[i].id));
-      if (!favIdx.length) {
-        speakRishi("You don't have any favourite songs yet.");
-        showCard(4500);
-        return;
-      }
-      const pick = favIdx[Math.floor(Math.random() * favIdx.length)];
-      speakRishi(`Playing favourite: ${cleanDisplay(list[pick].title)}`, async () => {
-        if (bridge) await bridge.playIndex(pick);
-      });
-      showCard(5000);
       return;
     }
 
@@ -575,41 +450,46 @@
       return;
     }
 
-    if (/^(play\s+a\s+song|play\s+music|play\s+anything|play|பாட்டு\s+போடு)$/.test(cmd)) {
-      const rnd = Math.floor(Math.random() * list.length);
-      speakRishi(`Playing ${cleanDisplay(list[rnd].title)}`, async () => {
-        if (bridge) await bridge.playIndex(rnd);
+    // FIRST check if the user named a specific song or director directly!
+    let matches = [];
+    for (const alt of transcripts) {
+      matches = findMatchingIndices(alt);
+      if (matches.length > 0) break;
+    }
+
+    if (matches.length > 0) {
+      // Direct song name / artist found -> Play immediately without asking for mood!
+      waitingForMood = false;
+      const pick = matches[0];
+      speakRishi(`Playing ${cleanDisplay(list[pick].title)}`, async () => {
+        if (bridge) await bridge.playIndex(pick);
       });
       showCard(5000);
       return;
     }
 
-    let matches = [];
-    for (const alt of transcripts) {
-      matches = findMatchingIndices(alt);
-      if (matches.length) break;
+    // ONLY IF IT IS VAGUE/GENERIC (like "play a song"), ask for the mood
+    if (/^(play\s+a\s+song|play\s+music|play\s+anything|play|பாட்டு\s+போடு)$/.test(cmd)) {
+      waitingForMood = true;
+      speakRishi(isTa ? "நிச்சயமாக! உங்கள் மனநிலை என்ன? (Happy, sad, romantic, chill, mass)" : "Sure! What mood are you in? Happy, sad, romantic, chill, or mass?", () => {
+        setTimeout(() => {
+          if (typeof startListening === "function") startListening();
+        }, 600);
+      });
+      showCard(6000);
+      return;
     }
 
-    if (matches.length) {
-      if (matches.length > 1 && $("shufBtn") && !$("shufBtn").classList.contains("on")) {
-        $("shufBtn").click();
-      }
-      const pick = matches[Math.floor(Math.random() * matches.length)];
-      speakRishi(`Playing ${cleanDisplay(list[pick].title)}`, async () => {
-        if (bridge) await bridge.playIndex(pick);
-      });
-      showCard(5000);
-    } else {
-      const rnd = Math.floor(Math.random() * list.length);
-      speakRishi(`I couldn't find ${tamilToEnglishPhonetic(primary)}, playing ${cleanDisplay(list[rnd].title)} instead.`, async () => {
-        if (bridge) await bridge.playIndex(rnd);
-      });
-      showCard(5500);
-    }
+    // Default fallback if nothing matched
+    const rnd = Math.floor(Math.random() * list.length);
+    speakRishi(`Playing ${cleanDisplay(list[rnd].title)}`, async () => {
+      if (bridge) await bridge.playIndex(rnd);
+    });
+    showCard(5500);
   }
 
   /* ------------------------------------------------------------
-     6. INSTANT TAP-TO-LISTEN SPEECH RECOGNITION
+   6. SPEECH RECOGNITION TRIGGER
      ------------------------------------------------------------ */
   let recognition = null;
   let isListening = false;
@@ -629,13 +509,11 @@
       alert("Voice recognition requires Google Chrome over HTTPS.");
       return;
     }
-
     if (isListening) {
       stopListening();
       return;
     }
 
-    stopMicLyricsFallback();
     const wasPlaying = !au.paused;
     if (wasPlaying) au.pause();
     try { window.speechSynthesis.cancel(); } catch (_) {}
@@ -651,7 +529,7 @@
       isListening = true;
       widget.classList.add("listening");
       $("rvdj-heard").textContent = lang === "ta-IN" ? "🎙️ கேட்கிறேன்..." : "🎙️ Listening...";
-      $("rvdj-reply").textContent = "Say a song, music director, or command";
+      $("rvdj-reply").textContent = waitingForMood ? "Say your mood (happy, sad, chill...)" : "Say song name or 'Play a song'";
       showCard();
     };
 
@@ -674,13 +552,10 @@
       }
     };
 
-    recognition.onerror = err => {
+    recognition.onerror = () => {
       stopListening();
-      $("rvdj-reply").textContent = err.error === "not-allowed"
-        ? "Please allow microphone access in Chrome."
-        : err.error === "network"
-        ? "Internet required for voice recognition."
-        : "Didn't catch that. Tap mic again.";
+      waitingForMood = false;
+      $("rvdj-reply").textContent = "Didn't catch that. Tap mic again.";
       showCard(4500);
       if (wasPlaying && $("play")) $("play").click();
     };
@@ -691,11 +566,7 @@
       recognition = null;
     };
 
-    try {
-      recognition.start();
-    } catch (e) {
-      stopListening();
-    }
+    try { recognition.start(); } catch (_) { stopListening(); }
   }
 
   $("rvdj-fab").onclick = startListening;
@@ -704,75 +575,12 @@
     prefs.voiceLang = prefs.voiceLang === "ta-IN" ? "en-US" : "ta-IN";
     savePrefs();
     $("rvdj-lang-toggle").textContent = prefs.voiceLang === "ta-IN" ? "தமிழ் / EN" : "EN / தமிழ்";
-    if ($("djLangSelect")) $("djLangSelect").value = prefs.voiceLang;
     speakRishi(prefs.voiceLang === "ta-IN" ? "தமிழ் குரல் தேர்வு செய்யப்பட்டது." : "English voice selected.");
     showCard(3500);
   };
-
-  /* ------------------------------------------------------------
-     7. BIND SETTINGS CONTROLS & AUDIO HOOKS
-     ------------------------------------------------------------ */
-  if ($("djGenderSelect")) {
-    $("djGenderSelect").value = prefs.voiceGender;
-    $("djGenderSelect").onchange = e => {
-      prefs.voiceGender = e.target.value;
-      savePrefs();
-      speakRishi(prefs.voiceGender === "male" ? "Male voice activated." : "Ladies voice activated.");
-    };
-  }
-  if ($("djLangSelect")) {
-    $("djLangSelect").value = prefs.voiceLang;
-    $("djLangSelect").onchange = e => {
-      prefs.voiceLang = e.target.value;
-      savePrefs();
-      $("rvdj-lang-toggle").textContent = prefs.voiceLang === "ta-IN" ? "தமிழ் / EN" : "EN / தமிழ்";
-      speakRishi(prefs.voiceLang === "ta-IN" ? "தமிழ் மொழி தேர்வு செய்யப்பட்டது." : "English language selected.");
-    };
-  }
-  if ($("liveAiLyricsToggle")) {
-    $("liveAiLyricsToggle").checked = !!prefs.liveAiLyrics;
-    $("liveAiLyricsToggle").onchange = e => {
-      prefs.liveAiLyrics = e.target.checked;
-      savePrefs();
-      if (prefs.liveAiLyrics) {
-        const cur = window.RishiBridge && window.RishiBridge.getCurrentTrack();
-        if (cur) autoFetchLyrics(cur);
-      } else {
-        stopMicLyricsFallback();
-        setLyricsStatus("Auto AI Lyrics: Off");
-      }
-    };
-  }
-  if ($("lyricsLangSelect")) {
-    $("lyricsLangSelect").value = prefs.lyricsLang;
-    $("lyricsLangSelect").onchange = e => {
-      prefs.lyricsLang = e.target.value;
-      savePrefs();
-    };
-  }
-  if ($("startVoiceChatBtn")) {
-    $("startVoiceChatBtn").onclick = () => {
-      if ($("sm")) $("sm").classList.remove("open");
-      startListening();
-    };
-  }
-  if ($("stopVoiceChatBtn")) {
-    $("stopVoiceChatBtn").onclick = stopListening;
-  }
-
-  if (window.RishiBridge) {
-    window.RishiBridge.getVoiceLang = () => prefs.voiceLang;
-    window.RishiBridge.toEnglishPhonetic = tamilToEnglishPhonetic;
-  }
 
   au.addEventListener("play", () => {
     const cur = window.RishiBridge && window.RishiBridge.getCurrentTrack();
     if (cur) autoFetchLyrics(cur);
   });
-  au.addEventListener("loadedmetadata", () => {
-    const cur = window.RishiBridge && window.RishiBridge.getCurrentTrack();
-    if (cur) autoFetchLyrics(cur);
-  });
-  au.addEventListener("pause", stopMicLyricsFallback);
-  au.addEventListener("ended", stopMicLyricsFallback);
 })();
