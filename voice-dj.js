@@ -1,7 +1,7 @@
 "use strict";
 
 /* ============================================================
-   RISHI VOICE DJ — SMART DIRECT MATCH + CONDITIONAL MOOD PROMPT
+   RISHI VOICE DJ — THEME-AWARE ACCENT + SMART CONDITIONAL MOOD
    Connects directly to index.html (#sm, #dock, window.RishiBridge)
    ============================================================ */
 (function initRishiVoiceDJ() {
@@ -107,7 +107,7 @@
   }
 
   /* ------------------------------------------------------------
-   2. FLOATING BLUE GLOSSY VOICE DJ BUTTON & CARD
+   2. THEME-AWARE ACCENT GLOSSY VOICE DJ WIDGET & CARD
      ------------------------------------------------------------ */
   const style = document.createElement("style");
   style.textContent = `
@@ -134,10 +134,10 @@
       max-width: 290px;
       padding: 11px 14px;
       border-radius: 18px;
-      background: linear-gradient(145deg, rgba(23,38,65,.96), rgba(11,21,37,.97));
-      border: 1px solid rgba(101,197,255,.38);
-      box-shadow: 0 10px 30px rgba(0,0,0,.45), 0 0 22px rgba(29,114,254,.35);
-      color: #f5f9ff;
+      background: linear-gradient(145deg, var(--card-light), var(--card));
+      border: 1px solid rgba(var(--accent-rgb), 0.45);
+      box-shadow: 0 10px 30px var(--shadow), 0 0 22px rgba(var(--accent-rgb), 0.35);
+      color: var(--text);
       font-size: 12px;
     }
     #rvdj-card.open { display: flex; }
@@ -150,11 +150,11 @@
       font-size: 11px;
       letter-spacing: .6px;
       text-transform: uppercase;
-      color: #65c5ff;
+      color: var(--accent-light);
     }
     .rvdj-lang-pill {
-      border: 1px solid rgba(101,197,255,.4);
-      background: rgba(29,114,254,.25);
+      border: 1px solid rgba(var(--accent-rgb), 0.4);
+      background: rgba(var(--accent-rgb), 0.25);
       color: #fff;
       border-radius: 999px;
       padding: 2px 8px;
@@ -162,30 +162,35 @@
       font-weight: 700;
       cursor: pointer;
     }
-    #rvdj-heard { color: #9bb3d4; font-style: italic; overflow-wrap: anywhere; }
-    #rvdj-reply { color: #fff; font-weight: 700; line-height: 1.4; overflow-wrap: anywhere; }
+    #rvdj-heard { color: var(--muted); font-style: italic; overflow-wrap: anywhere; }
+    #rvdj-reply { color: var(--text); font-weight: 700; line-height: 1.4; overflow-wrap: anywhere; }
     #rvdj-fab {
       pointer-events: auto;
       width: 54px;
       height: 54px;
       border-radius: 50%;
-      border: 1px solid rgba(101,197,255,.5);
-      background: linear-gradient(135deg, #65c5ff, #1d72fe, #0755d9);
+      border: 1px solid rgba(var(--accent-rgb), 0.6);
+      background: var(--gradient);
       color: #fff;
       font-size: 22px;
       display: grid;
       place-items: center;
       cursor: pointer;
       flex: none;
-      box-shadow: 0 6px 22px rgba(29,114,254,.55), inset 0 1px 2px rgba(255,255,255,.45);
+      box-shadow: 0 6px 22px rgba(var(--accent-rgb), 0.55), inset 0 1px 2px rgba(255,255,255,.45);
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+    #rvdj-fab:hover {
+      transform: scale(1.08);
+      box-shadow: 0 8px 28px rgba(var(--accent-rgb), 0.7);
     }
     #rvdj-widget.listening #rvdj-fab {
       animation: rvdjGlow 1.1s infinite;
     }
     @keyframes rvdjGlow {
-      0%   { box-shadow: 0 0 0 0 rgba(101,197,255,.75), 0 0 24px rgba(29,114,254,.8); }
-      70%  { box-shadow: 0 0 0 16px rgba(101,197,255,0), 0 0 28px rgba(29,114,254,.9); }
-      100% { box-shadow: 0 0 0 0 rgba(101,197,255,0), 0 0 24px rgba(29,114,254,.8); }
+      0%   { box-shadow: 0 0 0 0 rgba(var(--accent-rgb), 0.75), 0 0 24px rgba(var(--accent-rgb), 0.8); }
+      70%  { box-shadow: 0 0 0 16px rgba(var(--accent-rgb), 0), 0 0 28px rgba(var(--accent-rgb), 0.9); }
+      100% { box-shadow: 0 0 0 0 rgba(var(--accent-rgb), 0), 0 0 24px rgba(var(--accent-rgb), 0.8); }
     }
   `;
   document.head.appendChild(style);
@@ -201,7 +206,7 @@
         </button>
       </div>
       <div id="rvdj-heard">Tap mic &amp; speak</div>
-      <div id="rvdj-reply">Try saying a song name or "Play a song"</div>
+      <div id="rvdj-reply">Try song name or "Play a song"</div>
     </div>
     <button type="button" id="rvdj-fab" title="Rishi Voice DJ">🎙️</button>
   `;
@@ -327,7 +332,7 @@
   }
 
   /* ------------------------------------------------------------
-   5. SMART MATCHING (Direct song names / directors vs Moods)
+   5. SMART MATCHING (Direct song/director match + Conditional Mood)
      ------------------------------------------------------------ */
   let waitingForMood = false;
 
@@ -450,7 +455,7 @@
       return;
     }
 
-    // FIRST check if the user named a specific song or director directly!
+    // FIRST check if user named a specific song or director directly -> NO MOOD PROMPT
     let matches = [];
     for (const alt of transcripts) {
       matches = findMatchingIndices(alt);
@@ -458,7 +463,6 @@
     }
 
     if (matches.length > 0) {
-      // Direct song name / artist found -> Play immediately without asking for mood!
       waitingForMood = false;
       const pick = matches[0];
       speakRishi(`Playing ${cleanDisplay(list[pick].title)}`, async () => {
@@ -468,7 +472,7 @@
       return;
     }
 
-    // ONLY IF IT IS VAGUE/GENERIC (like "play a song"), ask for the mood
+    // ONLY IF VAGUE / GENERIC ("play a song"), ask for the mood
     if (/^(play\s+a\s+song|play\s+music|play\s+anything|play|பாட்டு\s+போடு)$/.test(cmd)) {
       waitingForMood = true;
       speakRishi(isTa ? "நிச்சயமாக! உங்கள் மனநிலை என்ன? (Happy, sad, romantic, chill, mass)" : "Sure! What mood are you in? Happy, sad, romantic, chill, or mass?", () => {
@@ -480,7 +484,7 @@
       return;
     }
 
-    // Default fallback if nothing matched
+    // Default fallback
     const rnd = Math.floor(Math.random() * list.length);
     speakRishi(`Playing ${cleanDisplay(list[rnd].title)}`, async () => {
       if (bridge) await bridge.playIndex(rnd);
