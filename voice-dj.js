@@ -1,7 +1,7 @@
 "use strict";
 
 /* ============================================================
-   RISHI VOICE DJ — THEME-AWARE ACCENT + CONDITIONAL MOOD FLOW
+   RISHI VOICE DJ — THEME-ACCENTED BUTTON & TRUE CONVERSATIONAL MOOD FLOW
    Connects directly to index.html (#sm, #dock, window.RishiBridge)
    ============================================================ */
 (function initRishiVoiceDJ() {
@@ -107,7 +107,7 @@
   }
 
   /* ------------------------------------------------------------
-   2. THEME-AWARE ACCENT GLOSSY VOICE DJ WIDGET & CARD
+   2. DYNAMIC THEME-ACCENTED VOICE DJ WIDGET & ROUND FAB BUTTON
      ------------------------------------------------------------ */
   const style = document.createElement("style");
   style.textContent = `
@@ -135,7 +135,7 @@
       padding: 11px 14px;
       border-radius: 18px;
       background: linear-gradient(145deg, var(--card-light), var(--card));
-      border: 1px solid rgba(var(--accent-rgb), 0.45);
+      border: 1px solid rgba(var(--accent-rgb), 0.5);
       box-shadow: 0 10px 30px var(--shadow), 0 0 22px rgba(var(--accent-rgb), 0.35);
       color: var(--text);
       font-size: 12px;
@@ -169,7 +169,7 @@
       width: 54px;
       height: 54px;
       border-radius: 50%;
-      border: 1px solid rgba(var(--accent-rgb), 0.6);
+      border: 1px solid rgba(var(--accent-rgb), 0.7);
       background: var(--gradient);
       color: #fff;
       font-size: 22px;
@@ -177,20 +177,20 @@
       place-items: center;
       cursor: pointer;
       flex: none;
-      box-shadow: 0 6px 22px rgba(var(--accent-rgb), 0.55), inset 0 1px 2px rgba(255,255,255,.45);
-      transition: transform 0.2s ease, box-shadow 0.2s ease;
+      box-shadow: 0 6px 22px rgba(var(--accent-rgb), 0.6), inset 0 1px 2px rgba(255,255,255,.45);
+      transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.3s ease;
     }
     #rvdj-fab:hover {
       transform: scale(1.08);
-      box-shadow: 0 8px 28px rgba(var(--accent-rgb), 0.7);
+      box-shadow: 0 8px 28px rgba(var(--accent-rgb), 0.8);
     }
     #rvdj-widget.listening #rvdj-fab {
       animation: rvdjGlow 1.1s infinite;
     }
     @keyframes rvdjGlow {
-      0%   { box-shadow: 0 0 0 0 rgba(var(--accent-rgb), 0.75), 0 0 24px rgba(var(--accent-rgb), 0.8); }
-      70%  { box-shadow: 0 0 0 16px rgba(var(--accent-rgb), 0), 0 0 28px rgba(var(--accent-rgb), 0.9); }
-      100% { box-shadow: 0 0 0 0 rgba(var(--accent-rgb), 0), 0 0 24px rgba(var(--accent-rgb), 0.8); }
+      0%   { box-shadow: 0 0 0 0 rgba(var(--accent-rgb), 0.8), 0 0 24px rgba(var(--accent-rgb), 0.9); }
+      70%  { box-shadow: 0 0 0 16px rgba(var(--accent-rgb), 0), 0 0 32px rgba(var(--accent-rgb), 1); }
+      100% { box-shadow: 0 0 0 0 rgba(var(--accent-rgb), 0), 0 0 24px rgba(var(--accent-rgb), 0.9); }
     }
   `;
   document.head.appendChild(style);
@@ -206,7 +206,7 @@
         </button>
       </div>
       <div id="rvdj-heard">Tap mic &amp; speak</div>
-      <div id="rvdj-reply">Try song name or "Play a song"</div>
+      <div id="rvdj-reply">Try: "Play a song" or song name</div>
     </div>
     <button type="button" id="rvdj-fab" title="Rishi Voice DJ">🎙️</button>
   `;
@@ -332,7 +332,7 @@
   }
 
   /* ------------------------------------------------------------
-   5. SMART MATCHING (Direct song/director match + Conditional Mood)
+   5. CONVERSATIONAL MOOD & SMART MATCHING ENGINE
      ------------------------------------------------------------ */
   let waitingForMood = false;
 
@@ -344,7 +344,7 @@
     mass: ["mass", "action", "hero", "energy", "beats", "peppy", "fire", "மாஸ்", "அடிதடி"]
   };
 
-  function findMatchingIndices(queryRaw) {
+  function findTracksByMoodOrQuery(queryRaw) {
     const list = (window.RishiBridge && window.RishiBridge.getTracks()) || [];
     if (!list.length) return [];
 
@@ -357,7 +357,7 @@
 
     const queryLower = cleaned.toLowerCase();
 
-    // 1. Check if user specified a mood (used when waiting for mood response)
+    // 1. Check if the input contains a mood keyword
     for (const [mood, keywords] of Object.entries(MOOD_DICTIONARY)) {
       if (keywords.some(k => queryLower.includes(k))) {
         const moodMatches = [];
@@ -369,7 +369,7 @@
       }
     }
 
-    // 2. Direct track title, movie, or director matching (Priority!)
+    // 2. Direct track title, movie, or director matching
     const phonetic = tamilToEnglishPhonetic(cleaned);
     const qSkel = skeleton(phonetic);
     const words = phonetic.toLowerCase().replace(/[^a-z0-9]+/g, " ").split(" ").filter(w => w.length >= 2);
@@ -409,21 +409,30 @@
     const primary = transcripts[0] || "";
     const cmd = primary.toLowerCase().replace(/^(hey\s+rishi|rishi|ok\s+rishi)[,\s]*/i, "").trim();
 
-    // If we asked for mood and user responded:
+    // 1. IF WAITING FOR MOOD: User just told us their mood (e.g., "happy", "sad")
     if (waitingForMood) {
       waitingForMood = false;
-      const moodMatches = findMatchingIndices(cmd);
-      if (moodMatches.length > 0) {
-        const pick = moodMatches[Math.floor(Math.random() * moodMatches.length)];
-        speakRishi("Playing a song for your mood!", async () => {
+      const matchingIndices = findTracksByMoodOrQuery(cmd);
+      if (matchingIndices.length > 0) {
+        // Pick a random song from that mood's pool
+        const pick = matchingIndices[Math.floor(Math.random() * matchingIndices.length)];
+        speakRishi(`Playing a ${cmd} song for you!`, async () => {
           if (bridge) await bridge.playIndex(pick);
+        });
+        showCard(5000);
+        return;
+      } else {
+        // Fallback if mood keyword wasn't recognized in library
+        const rnd = Math.floor(Math.random() * list.length);
+        speakRishi("Playing a random track for your vibe.", async () => {
+          if (bridge) await bridge.playIndex(rnd);
         });
         showCard(5000);
         return;
       }
     }
 
-    // Standard player control checks
+    // 2. STANDARD PLAYER CONTROLS
     if (/(pause|stop\s+music|stop\s+song|நிறுத்து)/.test(cmd)) {
       au.pause();
       speakRishi(isTa ? "இசை நிறுத்தப்பட்டது." : "Music paused.");
@@ -455,10 +464,10 @@
       return;
     }
 
-    // FIRST check if user named a specific song or director directly -> NO MOOD PROMPT
+    // 3. CHECK FOR SPECIFIC SONG OR DIRECTOR NAME FIRST (Direct Play - No Mood Prompt)
     let matches = [];
     for (const alt of transcripts) {
-      matches = findMatchingIndices(alt);
+      matches = findTracksByMoodOrQuery(alt);
       if (matches.length > 0) break;
     }
 
@@ -472,19 +481,23 @@
       return;
     }
 
-    // ONLY IF VAGUE / GENERIC ("play a song", "play song", "play some song"), ask for the mood
+    // 4. CHECK FOR GENERIC "PLAY A SONG" -> CONVERSATIONAL MOOD PROMPT
     if (/^(play\s+(a|some)?\s*songs?|play\s+music|play\s+anything|play|பாட்டு\s+போடு)$/.test(cmd)) {
-      waitingForMood = true;
-      speakRishi(isTa ? "நிச்சயமாக! உங்கள் மனநிலை என்ன? (Happy, sad, romantic, chill, mass)" : "Sure! What mood are you in? Happy, sad, romantic, chill, or mass?", () => {
-        setTimeout(() => {
-          if (typeof startListening === "function") startListening();
-        }, 600);
-      });
+      waitingForMood = true; // Flag active so next turn is treated as mood
+      speakRishi(
+        isTa ? "நிச்சயமாக! உங்கள் மனநிலை என்ன? (Happy, sad, romantic, chill, mass)" 
+             : "Sure! What mood are you in? Happy, sad, romantic, chill, or mass?", 
+        () => {
+          setTimeout(() => {
+            if (typeof startListening === "function") startListening();
+          }, 600);
+        }
+      );
       showCard(6000);
       return;
     }
 
-    // Default fallback
+    // 5. DEFAULT FALLBACK
     const rnd = Math.floor(Math.random() * list.length);
     speakRishi(`Playing ${cleanDisplay(list[rnd].title)}`, async () => {
       if (bridge) await bridge.playIndex(rnd);
@@ -533,7 +546,7 @@
       isListening = true;
       widget.classList.add("listening");
       $("rvdj-heard").textContent = lang === "ta-IN" ? "🎙️ கேட்கிறேன்..." : "🎙️ Listening...";
-      $("rvdj-reply").textContent = waitingForMood ? "Say your mood (happy, sad, chill...)" : "Say song name or 'Play a song'";
+      $("rvdj-reply").textContent = waitingForMood ? "Tell me your mood (happy, sad...)" : "Say song name or 'Play a song'";
       showCard();
     };
 
