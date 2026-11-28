@@ -1,7 +1,7 @@
 "use strict";
 
 /* ============================================================
-   RISHI VOICE DJ — THEME-ACCENTED BUTTON & TRUE CONVERSATIONAL MOOD FLOW
+   RISHI VOICE DJ — SMART TRIVIA + VOICE FILTERS + MOOD FLOW
    Connects directly to index.html (#sm, #dock, window.RishiBridge)
    ============================================================ */
 (function initRishiVoiceDJ() {
@@ -230,7 +230,7 @@
         </button>
       </div>
       <div id="rvdj-heard">Tap mic &amp; speak</div>
-      <div id="rvdj-reply">Try: "Play a song" or a song name</div>
+      <div id="rvdj-reply">Try: "Play a song" or song name</div>
     </div>
     <button type="button" id="rvdj-fab" title="Rishi Voice DJ" aria-label="Rishi Voice DJ">${MIC_SVG}</button>
   `;
@@ -356,15 +356,10 @@
   }
 
   /* ------------------------------------------------------------
-   5. CONVERSATIONAL MOOD & SMART MATCHING ENGINE
-      "play a song" / "play song" / "play some song"
-          -> asks "What mood are you in?" -> plays a song for that mood
-      any mood (even one not in the list)
-          -> plays a random song
-      a song / movie / director name
-          -> plays it directly, no questions asked
+   5. ADVANCED CONVERSATIONAL ENGINE (Trivia, Filters & Moods)
      ------------------------------------------------------------ */
   let waitingForMood = false;
+  let sessionGreeted = false;
 
   const MOOD_DICTIONARY = {
     happy: ["happy", "joy", "dance", "kuthu", "fun", "upbeat", "festive", "santhosham", "மகிழ்ச்சி", "குத்து"],
@@ -425,12 +420,26 @@
     return src[Math.floor(Math.random() * src.length)];
   }
 
-  // Score tracks against a spoken song / movie / director name.
-  function scoreTracksByName(queryRaw, list) {
-    const cleaned = stripWake(queryRaw)
+  // what is left of a spoken request once wake word and filler are removed
+  function cleanQuery(queryRaw) {
+    return stripWake(queryRaw)
       .replace(/\b(play|songs?|music|tracks?|by|from|of|the|my|please|podu|paattu|paadal)\b|பாட்டு|பாடல்கள்|பாடல்|போடு/gi, " ")
       .replace(/\s+/g, " ")
       .trim();
+  }
+
+  // true only when the whole request is exactly a song title ("Next Level"),
+  // not when a title merely contains a word from it ("next song")
+  function saidExactTitleOf(transcripts, list) {
+    return transcripts.some(alt => {
+      const q = skeleton(cleanQuery(alt));
+      return q.length >= 3 && list.some(t => skeleton(t.title) === q);
+    });
+  }
+
+  // Score tracks against a spoken song / movie / director name.
+  function scoreTracksByName(queryRaw, list) {
+    const cleaned = cleanQuery(queryRaw);
     if (!cleaned) return [];
 
     const phonetic = tamilToEnglishPhonetic(cleaned);
@@ -489,37 +498,89 @@
       showCard(5000);
     };
 
-    // 1. PLAYER CONTROLS (always available, even mid-conversation)
-    if (/(pause|stop\s+music|stop\s+song|நிறுத்து)/.test(cmd)) {
+    // An exact song title always wins over control words, so a song named
+    // "Next" or "Back" plays instead of skipping. The whole request must equal
+    // the title, so "next song" still skips.
+    const named = list.length ? bestNameMatch(alts, list) : null;
+    const saidExactTitle = list.length ? saidExactTitleOf(alts, list) : false;
+
+    // 1. TRIVIA & SONG DETAILS
+    if (/(tell me about|what song is this|who composed|about this song)/.test(cmd)) {
       waitingForMood = false;
-      au.pause();
-      speakRishi(isTa ? "இசை நிறுத்தப்பட்டது." : "Music paused.");
-      showCard(4000);
+      const cur = bridge && bridge.getCurrentTrack ? bridge.getCurrentTrack() : null;
+      if (!cur) {
+        speakRishi("No song is currently playing to give trivia about.");
+        showCard(4000);
+        return;
+      }
+      const title = cleanDisplay(cur.title);
+      const dir = cur.director && cur.director !== "UNKNOWN DIRECTOR" ? cleanDisplay(cur.director) : "";
+      speakRishi(
+        dir
+          ? `This track is titled ${title}, composed or directed by ${dir}. Enjoy the music!`
+          : `This track is titled ${title}. Enjoy the music!`
+      );
+      showCard(6000);
       return;
     }
-    const wantsResume =
-      /^(resume|continue|தொடர்)$/.test(cmd) ||
-      (/^play\s+music$/.test(cmd) && au.paused && au.currentSrc);
-    if (wantsResume) {
+
+    // 2. VOICE SMART FILTERS ("play only ...", "play my favourites")
+    if (/play only|play my|filter/i.test(cmd)) {
       waitingForMood = false;
-      if ($("play")) $("play").click();
-      speakRishi(isTa ? "பாடல் தொடர்கிறது." : "Resuming music.");
-      showCard(4000);
-      return;
+      if (/favorites|favourite/i.test(cmd)) {
+        const favIds = jget("rishi_favs", []);
+        const favIdx = list.map((t, i) => i).filter(i => favIds.includes(list[i].id));
+        if (favIdx.length) {
+          const pick = favIdx[Math.floor(Math.random() * favIdx.length)];
+          playAt(pick, `Playing your favourite: ${cleanDisplay(list[pick].title)}`);
+          return;
+        }
+        speakRishi("You don't have any favourite songs marked yet.");
+        showCard(4500);
+        return;
+      }
+
+      const matches = scoreTracksByName(cmd, list);
+      if (matches.length > 0) {
+        const pick = matches[0].idx;
+        playAt(pick, `Playing filtered track: ${cleanDisplay(list[pick].title)}`);
+        return;
+      }
     }
-    if (/(next|skip|அடுத்த)/.test(cmd)) {
-      waitingForMood = false;
-      if ($("next")) $("next").click();
-      speakRishi(isTa ? "அடுத்த பாடல் ஒலிக்கிறது." : "Playing next song.");
-      showCard(4000);
-      return;
-    }
-    if (/(previous|prev|back|முந்தைய)/.test(cmd)) {
-      waitingForMood = false;
-      if ($("prev")) $("prev").click();
-      speakRishi(isTa ? "முந்தைய பாடல்." : "Playing previous song.");
-      showCard(4000);
-      return;
+
+    // 3. STANDARD PLAYER CONTROLS
+    if (!saidExactTitle) {
+      if (/(pause|stop\s+music|stop\s+song|நிறுத்து)/.test(cmd)) {
+        waitingForMood = false;
+        au.pause();
+        speakRishi(isTa ? "இசை நிறுத்தப்பட்டது." : "Music paused.");
+        showCard(4000);
+        return;
+      }
+      const wantsResume =
+        /^(resume|continue|தொடர்)$/.test(cmd) ||
+        (/^play\s+music$/.test(cmd) && au.paused && au.currentSrc);
+      if (wantsResume) {
+        waitingForMood = false;
+        if ($("play")) $("play").click();
+        speakRishi(isTa ? "பாடல் தொடர்கிறது." : "Resuming music.");
+        showCard(4000);
+        return;
+      }
+      if (/(next|skip|அடுத்த)/.test(cmd)) {
+        waitingForMood = false;
+        if ($("next")) $("next").click();
+        speakRishi(isTa ? "அடுத்த பாடல் ஒலிக்கிறது." : "Playing next song.");
+        showCard(4000);
+        return;
+      }
+      if (/(previous|prev|back|முந்தைய)/.test(cmd)) {
+        waitingForMood = false;
+        if ($("prev")) $("prev").click();
+        speakRishi(isTa ? "முந்தைய பாடல்." : "Playing previous song.");
+        showCard(4000);
+        return;
+      }
     }
 
     if (!list.length) {
@@ -529,12 +590,9 @@
       return;
     }
 
-    // 2. WE JUST ASKED "WHAT MOOD?" -> whatever they said is the mood
+    // 4. WAITING FOR MOOD RESPONSE
     if (waitingForMood) {
       waitingForMood = false;
-
-      // if they answered with an exact song name instead, honour that
-      const named = bestNameMatch(alts, list);
       if (named && named.score >= 100) {
         playAt(named.idx, `Playing ${cleanDisplay(list[named.idx].title)}`);
         return;
@@ -542,38 +600,40 @@
 
       const mood = alts.map(detectMood).find(Boolean) || null;
       const pick = pickRandom(moodPool(mood, list), list);
-      playAt(pick, mood ? `Playing a ${mood} song for you!` : "Here's a random song for your mood!");
+      const title = cleanDisplay(list[pick].title);
+      playAt(
+        pick,
+        mood
+          ? (isTa ? `உங்கள் மனநிலைக்கு ஏற்ற பாடல்: ${title}` : `Playing a ${mood} song: ${title}`)
+          : (isTa ? `உங்களுக்காக ஒரு பாடல்: ${title}` : `Playing a random song: ${title}`)
+      );
       return;
     }
 
-    // 3. "PLAY A SONG" / "PLAY SONG" / "PLAY SOME SONG" -> ASK THE MOOD
+    // 5. "PLAY A SONG" / "PLAY SONG" / "PLAY SOME SONG" -> ASK "WHAT MOOD?"
     if (alts.some(isGenericPlayRequest)) {
       waitingForMood = true;
       speakRishi(
-        isTa ? "நிச்சயமாக! உங்கள் மனநிலை என்ன? மகிழ்ச்சி, சோகம், காதல், அமைதி, அல்லது மாஸ்?"
-             : "Sure! What mood are you in? Happy, sad, romantic, chill, or mass?",
-        () => setTimeout(startListening, 600)
+        isTa ? "என்ன மனநிலை?" : "What mood?",
+        () => setTimeout(listenAgain, 500)
       );
       showCard(6000);
       return;
     }
 
-    // 4. A SONG / MOVIE / DIRECTOR NAME -> PLAY IT DIRECTLY
-    const named = bestNameMatch(alts, list);
+    // 6. SONG / DIRECTOR MATCH -> PLAY DIRECTLY
     if (named && named.score >= 60) {
       playAt(named.idx, `Playing ${cleanDisplay(list[named.idx].title)}`);
       return;
     }
 
-    // 5. A MOOD WORD IN A FULL REQUEST ("play happy songs")
     const mood = alts.map(detectMood).find(Boolean) || null;
     if (mood) {
       const pick = pickRandom(moodPool(mood, list), list);
-      playAt(pick, `Playing a ${mood} song for you!`);
+      playAt(pick, `Playing a ${mood} song: ${cleanDisplay(list[pick].title)}`);
       return;
     }
 
-    // 6. WEAK NAME MATCH, OTHERWISE A RANDOM SONG
     if (named) {
       playAt(named.idx, `Playing ${cleanDisplay(list[named.idx].title)}`);
       return;
@@ -583,7 +643,7 @@
   }
 
   /* ------------------------------------------------------------
-   6. SPEECH RECOGNITION TRIGGER
+   6. SPEECH RECOGNITION TRIGGER WITH TIME GREETING
      ------------------------------------------------------------ */
   let recognition = null;
   let isListening = false;
@@ -594,11 +654,25 @@
     if (recognition) {
       const r = recognition;
       recognition = null;
-      // detach first: abort() fires a late "aborted" error that used to
+      // detach first: abort() fires a late "aborted" error that would
       // reset the mood prompt and overwrite the reply text
       r.onstart = r.onresult = r.onerror = r.onend = null;
       try { r.abort(); } catch (_) {}
     }
+  }
+
+  // Re-open the mic after Rishi finishes speaking, but never toggle it OFF
+  // if the user already tapped it in the meantime.
+  function listenAgain() {
+    if (!recognition) startListening();
+  }
+
+  function getTimeBasedGreeting() {
+    const hour = new Date().getHours();
+    const ta = prefs.voiceLang === "ta-IN";
+    if (hour < 12) return ta ? "காலை வணக்கம்! இசை கேட்கலாமா?" : "Good morning! Ready for some music?";
+    if (hour < 17) return ta ? "மதிய வணக்கம்! என்ன பாடல் போடலாம்?" : "Good afternoon! What should we play?";
+    return ta ? "மாலை வணக்கம்! இசை கேட்கலாமா?" : "Good evening! Ready for some chill tracks?";
   }
 
   function startListening() {
@@ -609,6 +683,14 @@
     }
     if (isListening) {
       stopListening();
+      return;
+    }
+
+    // Time-aware greeting on the first tap of the session
+    if (!sessionGreeted) {
+      sessionGreeted = true;
+      speakRishi(getTimeBasedGreeting(), () => setTimeout(listenAgain, 500));
+      showCard(4000);
       return;
     }
 
@@ -628,7 +710,7 @@
       isListening = true;
       widget.classList.add("listening");
       $("rvdj-heard").textContent = lang === "ta-IN" ? "🎙️ கேட்கிறேன்..." : "🎙️ Listening...";
-      $("rvdj-reply").textContent = waitingForMood ? "Tell me your mood (happy, sad...)" : "Say a song name or 'Play a song'";
+      $("rvdj-reply").textContent = waitingForMood ? "What mood? (happy, sad, chill...)" : "Say song name or 'Play a song'";
       showCard();
     };
 
