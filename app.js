@@ -228,7 +228,7 @@ function updateMediaSession(track) {
             title: track.title,
             artist: track.director,
             album: "Rishi Music",
-            artwork: [{ src: "./icon-512.png", sizes: "512x512", type: "image/png" }]
+            artwork: [{ src: "./icon-512.png?v=3", sizes: "512x512", type: "image/png" }]
         });
         registerMediaHandlers();
         syncMediaPosition();
@@ -254,6 +254,7 @@ async function loadTrackSource(index) {
     audio.load();
 
     audio.playbackRate = Number(appSettings.speed) || 1;
+    audio.volume = Math.max(0, Math.min(1, Number(appSettings.volume) / 100));
     dockTitle.textContent = track.title;
     dockSubtitle.textContent = track.director;
     currentTimeEl.textContent = "0:00";
